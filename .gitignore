@@ -1,0 +1,14 @@
+# ignores all .md files
+
+*.onnx
+*.png
+*.pth
+*.ipynb
+
+# ignore directories
+__pycache__/
+data/
+plots/
+outputs/
+notebooks/
+saves/
