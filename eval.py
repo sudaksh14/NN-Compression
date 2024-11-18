@@ -66,39 +66,6 @@ print(f"Number of Test samples: {len(test_dataset)}")
 # print(se.input_bits) # bits for input
 
 
-def evaluate(model, data_loader, plot_title, plot=False):
-    model = model.to(device)
-    model.eval()
-    
-    all_preds = []
-    all_labels = []
-    
-    with torch.no_grad():
-        for inputs, labels in data_loader:
-            inputs, labels = inputs.to(device), labels.to(device)
-            outputs = model(inputs)
-            _, preds = torch.max(outputs, 1)
-            all_preds.extend(preds.cpu().numpy())
-            all_labels.extend(labels.cpu().numpy())
-    
-    # Calculate metrics
-    accuracy = accuracy_score(all_labels, all_preds)
-    f1 = f1_score(all_labels, all_preds, average='weighted')
-    
-    print(f"Accuracy: {accuracy:.4f}, F1-Score: {f1:.4f}")
-    
-    # Plot accuracy and F1 score
-    if plot:
-        plt.figure(figsize=(8, 4))
-        plt.bar(['Accuracy', 'F1 Score'], [accuracy, f1], color=['skyblue', 'salmon'])
-        plt.ylabel("Score")
-        plt.title("Evaluation Metrics")
-        plt.savefig(f"./plots/{plot_title}")
-    
-    return accuracy, f1
-
-
-
 def fine_tuner(model, data_loader, num_epochs, prune_ratio, exp_name, LR=1e-3):
     # Set model to training mode
     model = model.to(device)
@@ -123,7 +90,7 @@ def fine_tuner(model, data_loader, num_epochs, prune_ratio, exp_name, LR=1e-3):
         running_loss = 0.0
         correct = 0
         total = 0
-        for inputs, labels in tqdm(data_loader, desc="Training Batches", leave=True):
+        for inputs, labels in data_loader:
             inputs, labels = inputs.to(device), labels.to(device)
             
             optimizer.zero_grad()
@@ -153,45 +120,6 @@ def fine_tuner(model, data_loader, num_epochs, prune_ratio, exp_name, LR=1e-3):
            
     print("Fine-Tuning Complete")
     
-
-# Plot the loss and accuracy curves
-def plot_curves(num_epochs, train_losses, train_accuracies, prune_ratio, exp_name):
-    
-    # Plot the training and validation loss curves
-    plt.figure(figsize=(12, 5))
-
-    # Plot Loss vs. Epoch
-    plt.subplot(1, 2, 1)
-    plt.plot(range(1, num_epochs + 1), train_losses, label='Train Loss')
-    # plt.plot(range(1, num_epochs + 1), val_losses, label='Validation Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.title('Loss vs. Epoch')
-    plt.legend()
-
-    # Plot Accuracy vs. Epoch
-    plt.subplot(1, 2, 2)
-    plt.plot(range(1, num_epochs + 1), train_accuracies, label='Train Accuracy')
-    # plt.plot(range(1, num_epochs + 1), val_accuracies, label='Validation Accuracy')
-    plt.xlabel('Epoch')
-    plt.ylabel('Accuracy')
-    plt.title('Accuracy vs. Epoch')
-    plt.legend()
-    
-    plt.savefig(f"./plots/{exp_name}_Learning_Curve_Fine-Tuning_pruning_{prune_ratio}")
-
-
-# Plotting results
-def plot_comparison(val_accuracy, val_f1_score, fine_tune_accuracy, fine_tune_f1_score, exp_name, prune_ratio):
-    plt.figure(figsize=(8, 4))
-    plt.bar(['Accuracy Before', 'F1 Score Before', 'Accuracy After', 'F1 Score After'],
-            [val_accuracy, val_f1_score, fine_tune_accuracy, fine_tune_f1_score],
-            color=['skyblue', 'salmon', 'skyblue', 'salmon'])
-    plt.ylabel("Score")
-    plt.title("Evaluation Metrics Before and After Fine-Tuning")
-    plt.savefig(f"./plots/{exp_name}_Resnet20_Accuracy_Comparison_{prune_ratio}")
-
-
 
 def pruner(exp_name, prune_amount=[0.1,0.3,0.5,0.7,0.9]):
     for prune_ratio in prune_amount:
@@ -356,8 +284,81 @@ def pruner_new(exp_name, prune_amount=[0.1,0.3,0.5,0.7,0.9]):
         
         # Plot the results
         plot_comparison(orig_accuracy, orig_f1_score, fine_tune_accuracy, fine_tune_f1_score, exp_name, p)
+        
 
-      
+def self_adaptive_CNN(exp_name, pruning_ratios=[0.3,0.5,0.7], path="./saves/state_dicts/", rebuilding=True):
+    
+    orig_model = torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_resnet20", pretrained=True).to(device)
+    torch.save(orig_model.state_dict(), os.path.join(path, f"Resnet_model_original"))
+    moving_acc = []
+    moving_f1 = []
+    
+    # Evaluate the model before Pruning
+    orig_accuracy, orig_f1_score = evaluate(orig_model, test_loader, "Resnet_Orig_metrics_cifar10", device=device)
+    moving_acc.append(orig_accuracy)
+    moving_f1.append(orig_f1_score)
+    
+    
+    for prune_ratio in pruning_ratios: 
+        p = str(int(prune_ratio*100))
+        print(f"Starting with Pruning ratio of {p}%")
+        
+        orig_model = torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_resnet20", pretrained=True).to(device)
+        
+        # Apply pruning
+        Index_Aware_pruner(orig_model, amount=prune_ratio, plot=False)
+        non_zero_weights, new_channels = get_nonzero_indices(orig_model)
+        
+        # Saving the channel dicts
+        channel_dict_path = os.path.join("./saves/channel_dicts", f"channel_dict_pruned_{p}")
+        with open(channel_dict_path, "wb") as f:
+            pickle.dump(new_channels, f)
+
+        # Rebuilding the pruned Model
+        pruned_model = Resnet_General(new_channels).to(device)
+        copy_weights(orig_model, pruned_model, non_zero_weights)
+        print("DONE REBUILDING")
+        
+        # Check the number of parameters in the original and pruned models
+        original_params = sum(p.numel() for p in orig_model.parameters())
+        final_params = sum(p.numel() for p in pruned_model.parameters())
+        print(f'Original Model Parameters: {original_params}')
+        print(f'Pruned Model Parameters: {final_params}')
+        
+        # Fine-Tune the pruned model
+        fine_tuner(pruned_model, train_loader, num_epochs=100, prune_ratio=p, exp_name=exp_name, LR=1e-1)
+        fine_tune_accuracy, fine_tune_f1_score = evaluate(pruned_model, test_loader, f"{exp_name}_Resnet_After_Fine-tune_{p}%", device=device)
+        moving_acc.append(fine_tune_accuracy)
+        moving_f1.append(fine_tune_f1_score)
+        
+        # torch.onnx.export(pruned_model, (torch.randn(1, 3, 32, 32).to(device),), f=f"./saves/onnx/pruned_model_{p}.onnx")
+        torch.save(pruned_model.state_dict(), os.path.join("./saves/state_dicts", f"Resnet_model_pruned_{p}"))
+        
+        # Plot the results
+        plot_comparison(orig_accuracy, orig_f1_score, fine_tune_accuracy, fine_tune_f1_score, exp_name, p)
+    
+    if rebuilding:
+        
+        for prune_ratio in pruning_ratios[-2::-1]:
+            p = str(int(prune_ratio*100))
+            
+            # Rebuilding a bigger model
+            channel_dict_path = os.path.join("./saves/channel_dicts", f"channel_dict_pruned_{p}")
+            state_dict_path = os.path.join("./saves/state_dicts", f"Resnet_model_pruned_{p}")
+            rebuilt_model = rebuilt_bigger(channel_dict_path, state_dict_path, device=device)
+            rebuilt_accuracy, rebuilt_f1_score = evaluate(rebuilt_model, test_loader, f"{exp_name}_Resnet_After_Fine-tune_{p}%", device=device)
+            moving_acc.append(rebuilt_accuracy)
+            moving_f1.append(rebuilt_f1_score)
+
+        plot_metrics(moving_acc, moving_f1, ticks=["Orig", "30%", "50%", "70%", "50%", "30%"], save_path="./plots/adaptive_metrics_plot.png")
+            
+            
+            
+    
+    
+    
+
+    
         
 if __name__ == '__main__':
     
@@ -366,9 +367,8 @@ if __name__ == '__main__':
     # iterative_pruner(train_loader, test_loader, 100, 0.2, "Iter_Prune")
     # Index_Aware_pruner(model, amount=0.2, plot=False)
     # non_zero_weights, new_channels = get_nonzero_indices(model)
-    pruner_new("HighLR_Index_Aware_Pruning")
-    
-    
+    # pruner_new("HighLR_Index_Aware_Pruning")
+    self_adaptive_CNN("Self_Adaptive_Trial_exp")
     
         
     

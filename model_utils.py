@@ -5,7 +5,204 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 import torch.nn.utils.prune as prune
 import matplotlib.pyplot as plt
+from sklearn.metrics import accuracy_score, f1_score
 import os
+import pickle
+import numpy as np
+
+
+def plot_metrics(accuracy, f1_score, ticks, save_path="./plots/metrics_plot.png"):
+
+    if len(accuracy) != len(f1_score) or len(accuracy) != len(ticks):
+        raise ValueError("Accuracy, F1 score, and x_ticks must have the same length.")
+    
+    plt.figure(figsize=(8, 6))
+    
+    # Plot accuracy
+    plt.plot(accuracy, label="Accuracy", marker='o', linestyle='-', color='b')
+    
+    # Plot F1 score
+    plt.plot(f1_score, label="F1 Score", marker='x', linestyle='-', color='g')
+    
+    # Adding title and labels
+    plt.title("Accuracy and F1 Score Over Pruning & Rebuilding", fontsize=14)
+    plt.xlabel("% Pruning", fontsize=12)
+    plt.ylabel("Metrics", fontsize=12)
+    plt.legend(fontsize=10)
+    
+    # Set custom ticks
+    plt.xticks(np.arange(len(accuracy)), labels=ticks, fontsize=10)
+    
+    plt.grid(alpha=0.4)
+    
+    # Save the plot to the specified file
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    
+    print(f"Plot saved as {save_path}")
+
+
+
+# Plot the loss and accuracy curves
+def plot_curves(num_epochs, train_losses, train_accuracies, prune_ratio, exp_name):
+    
+    # Plot the training and validation loss curves
+    plt.figure(figsize=(12, 5))
+
+    # Plot Loss vs. Epoch
+    plt.subplot(1, 2, 1)
+    plt.plot(range(1, num_epochs + 1), train_losses, label='Train Loss')
+    # plt.plot(range(1, num_epochs + 1), val_losses, label='Validation Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Loss vs. Epoch')
+    plt.legend()
+
+    # Plot Accuracy vs. Epoch
+    plt.subplot(1, 2, 2)
+    plt.plot(range(1, num_epochs + 1), train_accuracies, label='Train Accuracy')
+    # plt.plot(range(1, num_epochs + 1), val_accuracies, label='Validation Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.title('Accuracy vs. Epoch')
+    plt.legend()
+    
+    plt.savefig(f"./plots/{exp_name}_Learning_Curve_Fine-Tuning_pruning_{prune_ratio}")
+
+
+# Plotting results
+def plot_comparison(val_accuracy, val_f1_score, fine_tune_accuracy, fine_tune_f1_score, exp_name, prune_ratio):
+    plt.figure(figsize=(8, 4))
+    plt.bar(['Accuracy Before', 'F1 Score Before', 'Accuracy After', 'F1 Score After'],
+            [val_accuracy, val_f1_score, fine_tune_accuracy, fine_tune_f1_score],
+            color=['skyblue', 'salmon', 'skyblue', 'salmon'])
+    plt.ylabel("Score")
+    plt.title("Evaluation Metrics Before and After Fine-Tuning")
+    plt.savefig(f"./plots/{exp_name}_Resnet20_Accuracy_Comparison_{prune_ratio}")
+    
+    
+def evaluate(model, data_loader, plot_title, device, plot=False):
+    model = model.to(device)
+    model.eval()
+    
+    all_preds = []
+    all_labels = []
+    
+    with torch.no_grad():
+        for inputs, labels in data_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
+            _, preds = torch.max(outputs, 1)
+            all_preds.extend(preds.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
+    
+    # Calculate metrics
+    accuracy = accuracy_score(all_labels, all_preds)
+    f1 = f1_score(all_labels, all_preds, average='weighted')
+    
+    print(f"Accuracy: {accuracy:.4f}, F1-Score: {f1:.4f}")
+    
+    # Plot accuracy and F1 score
+    if plot:
+        plt.figure(figsize=(8, 4))
+        plt.bar(['Accuracy', 'F1 Score'], [accuracy, f1], color=['skyblue', 'salmon'])
+        plt.ylabel("Score")
+        plt.title("Evaluation Metrics")
+        plt.savefig(f"./plots/{plot_title}")
+    
+    return accuracy, f1
+
+
+def visualize_weights(weights, title="Pruned Weights in Conv1", save_path="./plots", name="conv1_pruned_weights.png"):
+    """
+    Visualizes and saves the weights of a convolutional layer as a series of 2D images, 
+    where each image corresponds to one filter in the layer.
+    
+    Parameters:
+        weights (torch.Tensor): The weight tensor of shape (out_channels, in_channels, height, width).
+        title (str): Title for the plot.
+        save_path (str): Path where the image will be saved.
+    """
+    out_channels, in_channels, height, width = weights.shape
+
+    # Set up subplots to display each out_channel
+    n_cols = min(8, out_channels)  # Set the number of columns
+    n_rows = (out_channels + n_cols - 1) // n_cols  # Calculate rows based on columns
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols * 2, n_rows * 2))
+    fig.suptitle(title, fontsize=16)
+
+    # Loop through each filter (output channel) and plot it
+    for i in range(out_channels):
+        # Selecting the weights for the first input channel of each filter for visualization
+        kernel = weights[i, 0].cpu().detach().numpy()
+
+        # Determine the plot position
+        ax = axes[i // n_cols, i % n_cols] if n_rows > 1 else axes[i % n_cols]
+        ax.imshow(kernel, cmap="gray")
+        ax.axis("off")
+        ax.set_title(f"Filter {i}")
+
+    # Hide any remaining empty subplots
+    for j in range(i + 1, n_rows * n_cols):
+        fig.delaxes(axes.flatten()[j])
+
+    # Adjust layout and save the figure
+    plt.tight_layout()
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(f"{save_path}/{name}")
+    print(f"Pruned weights visualization saved")
+    
+    
+def visualize_4d_tensor(tensor, title="Pruned Weights in Conv1", save_path="./plots", name="conv1_pruned_weights.png"):
+    
+    dim0, dim1, dim2, dim3 = tensor.shape
+    
+    # Create a figure with 'dim1' rows and 'dim0' columns
+    fig, axs = plt.subplots(dim1, dim0, figsize=(dim0*3, dim1*3))
+    fig.suptitle(title, fontsize=16)
+    
+    for i in range(dim1):
+        for j in range(dim0):
+            ax = axs[i, j] if dim1 > 1 and dim0 > 1 else axs[max(i, j)]
+            matrix = tensor[j, i].cpu().numpy()  # Swap i and j to reflect dim0 as columns
+            
+            # Plot the matrix as an image
+            im = ax.imshow(matrix, cmap='viridis', aspect='auto')
+            ax.set_title(f"Matrix [{j}, {i}]")
+            ax.axis('off')
+            
+            # Add color bar
+            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+    plt.tight_layout()
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(f"{save_path}/{name}")
+    print(f"Pruned weights visualization saved")
+    
+    
+    
+def print_pruned_weights(layer, pruned_indices, dim=0):
+    """
+    Prints the weights of the layer that were pruned based on the pruned indices.
+
+    Parameters:
+        layer (torch.nn.Module): The layer from which weights were pruned.
+        pruned_indices (torch.Tensor): Indices of the pruned channels.
+        dim (int): Dimension along which pruning was applied (0 for output channels, 1 for input channels).
+    """
+    # Access the weight data
+    weights = layer.weight.data
+
+    if dim == 0:
+        # Pruned output channels
+        pruned_weights = weights[pruned_indices]
+    elif dim == 1:
+        # Pruned input channels
+        pruned_weights = weights[:, pruned_indices]
+    else:
+        raise ValueError("Dimension for pruning must be 0 or 1.")
+    
+    print(f"Pruned Weights (dim={dim}) for indices {pruned_indices.tolist()}:\n", pruned_weights)
 
 
 class BasicBlock(nn.Module):
@@ -59,6 +256,7 @@ class ResNet(nn.Module):
         out = out.view(out.size(0), -1)
         out = self.fc(out)
         return out
+
 
 class ResNet_prune(nn.Module):
     def __init__(self, block, num_blocks, prune_ratio, first_channel):
@@ -207,99 +405,6 @@ def prune_linear_layer(layer: nn.Linear, index: torch.LongTensor, dim: int = 0) 
         new_layer.bias.requires_grad = True
     return new_layer
         
-        
-        
-def visualize_weights(weights, title="Pruned Weights in Conv1", save_path="./plots", name="conv1_pruned_weights.png"):
-    """
-    Visualizes and saves the weights of a convolutional layer as a series of 2D images, 
-    where each image corresponds to one filter in the layer.
-    
-    Parameters:
-        weights (torch.Tensor): The weight tensor of shape (out_channels, in_channels, height, width).
-        title (str): Title for the plot.
-        save_path (str): Path where the image will be saved.
-    """
-    out_channels, in_channels, height, width = weights.shape
-
-    # Set up subplots to display each out_channel
-    n_cols = min(8, out_channels)  # Set the number of columns
-    n_rows = (out_channels + n_cols - 1) // n_cols  # Calculate rows based on columns
-
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols * 2, n_rows * 2))
-    fig.suptitle(title, fontsize=16)
-
-    # Loop through each filter (output channel) and plot it
-    for i in range(out_channels):
-        # Selecting the weights for the first input channel of each filter for visualization
-        kernel = weights[i, 0].cpu().detach().numpy()
-
-        # Determine the plot position
-        ax = axes[i // n_cols, i % n_cols] if n_rows > 1 else axes[i % n_cols]
-        ax.imshow(kernel, cmap="gray")
-        ax.axis("off")
-        ax.set_title(f"Filter {i}")
-
-    # Hide any remaining empty subplots
-    for j in range(i + 1, n_rows * n_cols):
-        fig.delaxes(axes.flatten()[j])
-
-    # Adjust layout and save the figure
-    plt.tight_layout()
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    plt.savefig(f"{save_path}/{name}")
-    print(f"Pruned weights visualization saved")
-    
-    
-def visualize_4d_tensor(tensor, title="Pruned Weights in Conv1", save_path="./plots", name="conv1_pruned_weights.png"):
-    
-    dim0, dim1, dim2, dim3 = tensor.shape
-    
-    # Create a figure with 'dim1' rows and 'dim0' columns
-    fig, axs = plt.subplots(dim1, dim0, figsize=(dim0*3, dim1*3))
-    fig.suptitle(title, fontsize=16)
-    
-    for i in range(dim1):
-        for j in range(dim0):
-            ax = axs[i, j] if dim1 > 1 and dim0 > 1 else axs[max(i, j)]
-            matrix = tensor[j, i].cpu().numpy()  # Swap i and j to reflect dim0 as columns
-            
-            # Plot the matrix as an image
-            im = ax.imshow(matrix, cmap='viridis', aspect='auto')
-            ax.set_title(f"Matrix [{j}, {i}]")
-            ax.axis('off')
-            
-            # Add color bar
-            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-
-    plt.tight_layout()
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    plt.savefig(f"{save_path}/{name}")
-    print(f"Pruned weights visualization saved")
-    
-    
-    
-def print_pruned_weights(layer, pruned_indices, dim=0):
-    """
-    Prints the weights of the layer that were pruned based on the pruned indices.
-
-    Parameters:
-        layer (torch.nn.Module): The layer from which weights were pruned.
-        pruned_indices (torch.Tensor): Indices of the pruned channels.
-        dim (int): Dimension along which pruning was applied (0 for output channels, 1 for input channels).
-    """
-    # Access the weight data
-    weights = layer.weight.data
-
-    if dim == 0:
-        # Pruned output channels
-        pruned_weights = weights[pruned_indices]
-    elif dim == 1:
-        # Pruned input channels
-        pruned_weights = weights[:, pruned_indices]
-    else:
-        raise ValueError("Dimension for pruning must be 0 or 1.")
-    
-    print(f"Pruned Weights (dim={dim}) for indices {pruned_indices.tolist()}:\n", pruned_weights)
 
 
 
@@ -515,10 +620,14 @@ def copy_weights(pruned_model, rebuilt_model, nonzero_channels):
 
 
     
-def rebuilt_bigger(channel_dict, state_dict, prune_level=0.1):
+def rebuilt_bigger(channel_dict_path, state_dict_path, device):
+    
+    with open(channel_dict_path, "rb") as f:
+        channel_dict = pickle.load(f)
+    
     
     model = Resnet_General(channel_dict)
-    model.load_state_dict(state_dict)
+    model.load_state_dict(torch.load(state_dict_path, map_location=device, weights_only=True))
     return model
     
     
