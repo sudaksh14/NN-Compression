@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 import torch.nn.utils.prune as prune
@@ -9,7 +10,15 @@ from sklearn.metrics import accuracy_score, f1_score
 import os
 import pickle
 import numpy as np
+from ptflops import get_model_complexity_info
+from calflops import calculate_flops
+from thop import profile
 
+
+
+# Set device for training and evaluation
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Running on device:", device)
 
 def plot_metrics(accuracy, f1_score, ticks, save_path="./plots/metrics_plot.png"):
 
@@ -66,7 +75,7 @@ def plot_curves(num_epochs, train_losses, train_accuracies, prune_ratio, exp_nam
     plt.title('Accuracy vs. Epoch')
     plt.legend()
     
-    plt.savefig(f"./plots/{exp_name}_Learning_Curve_Fine-Tuning_pruning_{prune_ratio}")
+    plt.savefig(f"./plots/{exp_name}_Learning_Curve_Fine-Tuning_pruning_{str(int(prune_ratio*100))}")
 
 
 # Plotting results
@@ -77,10 +86,59 @@ def plot_comparison(val_accuracy, val_f1_score, fine_tune_accuracy, fine_tune_f1
             color=['skyblue', 'salmon', 'skyblue', 'salmon'])
     plt.ylabel("Score")
     plt.title("Evaluation Metrics Before and After Fine-Tuning")
-    plt.savefig(f"./plots/{exp_name}_Resnet20_Accuracy_Comparison_{prune_ratio}")
+    plt.savefig(f"./plots/{exp_name}_Resnet20_Accuracy_Comparison_{str(int(prune_ratio*100))}")
+    
+def plot_comparison_3stage(accuracy_list, exp_name, prune_ratio):
+    plt.figure(figsize=(10, 6))
+    plt.bar(['Accuracy Original', 'F1 Score Original', 'Accuracy Pruned', 'F1 Score Pruned', 'Accuracy Rebuilt', 'F1 Score Rebuilt'],
+            [*accuracy_list],
+            color=['skyblue', 'salmon', 'skyblue', 'salmon', 'skyblue', 'salmon'])
+    plt.ylabel("Metrics")
+    plt.title("Evaluation Metrics for Pruning and Rebuilding")
+    plt.savefig(f"./plots/{exp_name}_Resnet20_Accuracy_Comparison_{str(int(prune_ratio*100))}")
+    
+
+def plot_profiling(params, macs, sizes, exp_name, prune_ratio):
+    
+    labels = ["Original", "Pruned", "Rebuilt"]
+    flops = [2 * mac for mac in macs]  # FLOPs
+
+    # Create subplots
+    fig, axes = plt.subplots(4, 1, figsize=(10, 12), sharex=True)
+
+    # Plot Parameters
+    axes[0].plot(labels, params, marker='o', color='blue', linestyle='-')
+    axes[0].set_title("Number of Parameters")
+    axes[0].set_ylabel("Parameters")
+    axes[0].grid(True, linestyle="--", alpha=0.5)
+
+    # Plot MACs
+    axes[1].plot(labels, macs, marker='s', color='cyan', linestyle='--')
+    axes[1].set_title("MACs")
+    axes[1].set_ylabel("MACs")
+    axes[1].grid(True, linestyle="--", alpha=0.5)
+
+    # Plot FLOPs
+    axes[2].plot(labels, flops, marker='^', color='green', linestyle=':')
+    axes[2].set_title("FLOPs")
+    axes[2].set_ylabel("FLOPs")
+    axes[2].grid(True, linestyle="--", alpha=0.5)
+
+    # Plot Model Size
+    axes[3].plot(labels, sizes, marker='d', color='red', linestyle='-')
+    axes[3].set_title("Model Size (MB)")
+    axes[3].set_xlabel("Epochs")
+    axes[3].set_ylabel("Size (MB)")
+    axes[3].grid(True, linestyle="--", alpha=0.5)
+
+    # Adjust layout
+    plt.tight_layout()
+
+    # Save and show the plot
+    plt.savefig(f"./plots/{exp_name}_Performance_Metrics_{str(int(prune_ratio*100))}")
     
     
-def evaluate(model, data_loader, plot_title, device, plot=False):
+def evaluate(model, data_loader, plot_title="Test Accuracy & F1-Score", device=device, plot=False, profiling=False):
     model = model.to(device)
     model.eval()
     
@@ -100,7 +158,7 @@ def evaluate(model, data_loader, plot_title, device, plot=False):
     f1 = f1_score(all_labels, all_preds, average='weighted')
     
     print(f"Accuracy: {accuracy:.4f}, F1-Score: {f1:.4f}")
-    
+        
     # Plot accuracy and F1 score
     if plot:
         plt.figure(figsize=(8, 4))
@@ -108,7 +166,11 @@ def evaluate(model, data_loader, plot_title, device, plot=False):
         plt.ylabel("Score")
         plt.title("Evaluation Metrics")
         plt.savefig(f"./plots/{plot_title}")
-    
+        
+    if profiling:
+        params, mac, size_mb = profile_model_during_training(model, (3,32,32))
+        return accuracy, f1, params, mac, size_mb
+        
     return accuracy, f1
 
 
@@ -289,11 +351,12 @@ class ResNet_prune(nn.Module):
         out = self.fc(out)
         return out
 
-
+"""
 channel_dict = {'conv1': (13, 3), 'layer1.0.conv1': (13, 13), 'layer1.0.conv2': (13, 13), 'layer1.1.conv1': (13, 13), 'layer1.1.conv2': (13, 13), 'layer1.2.conv1': (13, 13), 
  'layer1.2.conv2': (13, 13), 'layer2.0.conv1': (26, 13), 'layer2.0.conv2': (26, 26), 'layer2.0.downsample.0': (26, 13), 'layer2.1.conv1': (26, 26), 
  'layer2.1.conv2': (26, 26), 'layer2.2.conv1': (26, 26), 'layer2.2.conv2': (26, 26), 'layer3.0.conv1': (52, 26), 'layer3.0.conv2': (52, 52), 
  'layer3.0.downsample.0': (52, 26), 'layer3.1.conv1': (52, 52), 'layer3.1.conv2': (52, 52), 'layer3.2.conv1': (52, 52), 'layer3.2.conv2': (52, 52)}
+ """
 
 class ResNet_general(nn.Module):
     def __init__(self, block, num_blocks, channel_dict):
@@ -530,20 +593,18 @@ def Index_Aware_pruner(model, amount, res_blocks=3, plot=True):
                 print(name,  type(module))
                 pruned_indices_0 = get_pruned_channel_indices(module.weight, amount)
                 pruner = ChannelPruning(pruned_indices_0, dim=0)
-                pruner.apply(module, name="weight", indices=pruned_indices_0, dim=0) # Prune along the first output channel dimension
+                pruner.apply(module, name="weight", indices=pruned_indices_0, dim=0) # Prune along the output channel dimension
                 prune.remove(module, name="weight")
-                # print(dict(module.state_dict()).keys())
-                # print(f"Name of module: {name}, Shape After Pruning: {module.weight.shape}")
+ 
             else:
                 
                 print(name,  type(module))
                 if 'downsample' in name:
-                    # Check for the pruning indices of dim 0, should match with the next layer!!!
-                    indices_down_0 = get_pruned_channel_indices(module.weight, amount)
+                    
                     pruner_down_1 = ChannelPruning(indices_down_1, dim=1)
-                    pruner_down_0 = ChannelPruning(indices_down_0, dim=0)
-                    pruner_down_1.apply(module, name="weight", indices=indices_down_1, dim=1)
-                    pruner_down_0.apply(module, name="weight", indices=indices_down_0, dim=0)
+                    pruner_down_0 = ChannelPruning(indices_last_layer, dim=0)
+                    pruner_down_1.apply(module, name="weight", indices=indices_down_1, dim=1) # Prune along the input channel dimension 
+                    pruner_down_0.apply(module, name="weight", indices=indices_last_layer, dim=0) # Prune along the output channel dimension
                     prune.remove(module, name="weight")
                     
                 else:
@@ -554,17 +615,15 @@ def Index_Aware_pruner(model, amount, res_blocks=3, plot=True):
                     pruner_dim_1.apply(module, name="weight", indices=indices_last_layer, dim=1) # Prune along the input channel dimension
                     pruner_dim_0.apply(module, name="weight", indices=pruned_indices_0, dim=0) # Prune along the output channel dimension
                     prune.remove(module, name="weight")
-                    # print(dict(module.state_dict()).keys())
-                    # print(f"Name of module: {name}, Shape After Pruning: {module.weight.shape}")
-                
+
                     count += 1
                 
                 
             indices_last_layer = pruned_indices_0
-            if count % (res_blocks*2) == 0:
+            if count != 0 and count % (res_blocks*2) == 0:
                 indices_down_1 = indices_last_layer
 
-            print(indices_last_layer)
+            print("Pruned at output channel Indices: ", indices_last_layer.tolist())
             
             if plot:
                 visualize_4d_tensor(module.weight.data, title=f"Pruned weights in {name}", name=f"Resnet_{name}_pruned_weights")
@@ -574,6 +633,7 @@ def Index_Aware_pruner(model, amount, res_blocks=3, plot=True):
 def get_nonzero_indices(model):
     non_zero_indices = {}
     new_channels = {}
+    
     for name, module in model.named_modules():
         if isinstance(module, nn.Conv2d):
             
@@ -594,8 +654,8 @@ def get_nonzero_indices(model):
                             
                         
     return non_zero_indices, new_channels
-            
-            
+
+
 # Function to copy weights from pruned model to reduced model
 def copy_weights(pruned_model, rebuilt_model, nonzero_channels):
     for name, module in pruned_model.named_modules():
@@ -614,12 +674,16 @@ def copy_weights(pruned_model, rebuilt_model, nonzero_channels):
                         dim0, dim1 = nonzero_channels[name][n]
                         reduced_layer.weight.data[i,j] = pruned_layer.weight.data[dim0, dim1]
                         n += 1
+     
+     
+                
+def copy_weights_from_dict(pruned_model, unpruned_weights):
+    for name, module in pruned_model.named_modules():
+        if isinstance(module, nn.Conv2d):
+            
+            module.weight.data = unpruned_weights[name]
 
-                    # if pruned_layer.bias is not None:
-                    #     reduced_layer.bias.data[i] = pruned_layer.bias.data[orig_idx]
 
-
-    
 def rebuilt_bigger(channel_dict_path, state_dict_path, device):
     
     with open(channel_dict_path, "rb") as f:
@@ -629,7 +693,262 @@ def rebuilt_bigger(channel_dict_path, state_dict_path, device):
     model = Resnet_General(channel_dict)
     model.load_state_dict(torch.load(state_dict_path, map_location=device, weights_only=True))
     return model
+
+
+
+
+def get_pruned_indices_and_counts(model):
+    """
+    Analyze a structurally pruned model to determine:
+    - The indices of pruned channels (dim 0 and dim 1).
+    - The number of pruned channels in each layer.
     
+    Parameters:
+    - model: The PyTorch model.
+
+    Returns:
+    - pruned_info: A dictionary containing pruned indices and counts for each layer.
+    """
+    pruned_info = {}
+    pruned_weights = {}
+    num_pruned_channels = {}
+    
+    for name, layer in model.named_modules():
+        if isinstance(layer, nn.Conv2d):  # Check for Conv2d layers
+            layer_info = {}
+            
+            # Get the weight tensor
+            weights = layer.weight.detach()
+            
+            # Identify pruned filters along dim=0 (output channels)
+            pruned_dim0 = torch.nonzero(weights.abs().sum(dim=(1, 2, 3)) == 0).squeeze().tolist()
+            if isinstance(pruned_dim0, int):  # Handle single index case
+                pruned_dim0 = [pruned_dim0]
+            layer_info['pruned_dim0'] = pruned_dim0
+            
+            
+            # Identify pruned filters along dim=1 (input channels)
+            pruned_dim1 = torch.nonzero(weights.abs().sum(dim=(0, 2, 3)) == 0).squeeze().tolist()
+            if isinstance(pruned_dim1, int):  # Handle single index case
+                pruned_dim1 = [pruned_dim1]
+            layer_info['pruned_dim1'] = pruned_dim1
+            
+            # Add layer information to pruned_info
+            pruned_info[name] = layer_info
+            num_pruned_channels[name] = (len(pruned_dim0), len(pruned_dim1))
+            
+            pruned_weights[name] = weights[pruned_dim0][:,pruned_dim1,:,:]
+    
+    return pruned_info, num_pruned_channels, pruned_weights
+            
+            
+def get_unpruned_indices_and_counts(model):
+    non_pruned_info = {}
+    num_unpruned_channels = {}
+    unpruned_weights = {}
+    
+    for name, module in model.named_modules():
+        if isinstance(module, nn.Conv2d):
+            
+            layer_info = {}
+            
+            # Get the weight tensor
+            weights = module.weight.detach()
+            
+            # Identify pruned filters along dim=0 (output channels)
+            pruned_dim0 = torch.nonzero(weights.abs().sum(dim=(1, 2, 3)) > 0).squeeze().tolist()
+            if isinstance(pruned_dim0, int):  # Handle single index case
+                pruned_dim0 = [pruned_dim0]
+            layer_info['pruned_dim0'] = pruned_dim0
+            
+            
+            # Identify pruned filters along dim=1 (input channels)
+            pruned_dim1 = torch.nonzero(weights.abs().sum(dim=(0, 2, 3)) > 0).squeeze().tolist()
+            if isinstance(pruned_dim1, int):  # Handle single index case
+                pruned_dim1 = [pruned_dim1]
+            layer_info['pruned_dim1'] = pruned_dim1
+        
+            non_pruned_info[name] = layer_info
+            num_unpruned_channels[name] = (len(pruned_dim0), len(pruned_dim1))
+            unpruned_weights[name] = weights[pruned_dim0][:,pruned_dim1,:,:]
+                            
+                        
+    return non_pruned_info, num_unpruned_channels, unpruned_weights
+
+            
+
+def extend_channels(model, pruned_dict):
+    
+    new_channel_dict = {}
+    for name, module in model.named_modules():
+        if isinstance(module, nn.Conv2d):
+            
+            new_in_channel = int(module.weight.data.shape[0] + pruned_dict[name][0])
+            new_out_channel = int(module.weight.data.shape[1] + pruned_dict[name][1])
+            
+            new_channel_dict[name] = (new_in_channel, new_out_channel)
+            
+    return new_channel_dict
+
+
+
+def reconstruct_weights_from_dicts(model, pruned_indices, pruned_weights, unpruned_indices, unpruned_weights):
+    """
+    Reconstruct weights for a model using pruned and unpruned indices and tensors.
+
+    Parameters:
+    - pruned_indices: dict, mapping layer names to (dim0_indices, dim1_indices) of pruned weights.
+    - pruned_weights: dict, mapping layer names to tensors of pruned weights.
+    - unpruned_indices: dict, mapping layer names to (dim0_indices, dim1_indices) of unpruned weights.
+    - unpruned_weights: dict, mapping layer names to tensors of unpruned weights.
+    - model: torch.nn.Module, the model to reconstruct weights for.
+
+    Returns:
+    - reconstructed_model: torch.nn.Module, the model with reconstructed weights.
+    """
+    # Iterate through the model's state_dict to dynamically fetch layer shapes
+    for name, layer in model.named_modules():
+        if isinstance(layer, nn.Conv2d):
+            
+            new_device = layer.weight.device
+
+            # Retrieve pruned and unpruned indices
+            pruned_dim0, pruned_dim1 = pruned_indices[name].values()
+            unpruned_dim0, unpruned_dim1 = unpruned_indices[name].values()
+
+            # Assign pruned weights
+            layer.weight.data[pruned_dim0][:,pruned_dim1,:,:] = pruned_weights[name].to(new_device)
+
+            # Assign unpruned weights
+            layer.weight.data[unpruned_dim0][:,unpruned_dim1,:,:] = unpruned_weights[name].to(new_device)
+            
+    return model
+                       
+                       
+
+def freeze_channels(model, channel_dict):
+    """
+    Freeze specific channels in convolutional layers based on the provided channel dictionary.
+
+    Parameters:
+    - model: The PyTorch model (e.g., ResNet-20).
+    - channel_dict: A dictionary where keys are layer names, and values are dicts specifying
+                    channels to freeze for dim 0 (output channels) and dim 1 (input channels).
+                    Example:
+                        {
+                            "layer1.0.conv1": {"dim0": [0, 1], "dim1": [2, 3]},
+                            "layer2.0.conv1": {"dim0": [4], "dim1": [1, 6]}
+                        }
+
+    Returns:
+    - model: The modified model with specified channels frozen.
+    """
+    for name, layer in model.named_modules():
+        if isinstance(layer, nn.Conv2d) and name in channel_dict:
+            freeze_info = channel_dict[name]
+            dim0_channels = freeze_info.get("pruned_dim0", [])
+            dim1_channels = freeze_info.get("pruned_dim1", [])
+            
+            with torch.no_grad():
+                weight = layer.weight
+                if weight.requires_grad:
+                    # Create masks for the dimensions
+                    mask_dim0 = torch.zeros_like(weight, dtype=torch.bool)
+                    mask_dim0[dim0_channels, :, :, :] = True
+                    
+                    mask_dim1 = torch.zeros_like(weight, dtype=torch.bool)
+                    mask_dim1[:, dim1_channels, :, :] = True
+                    
+                    # Combine masks to handle both dim 0 and dim 1
+                    combined_mask = mask_dim0 | mask_dim1
+                    
+                    # Register a backward hook to ensure frozen channels' gradients are zeroed out
+                    def freeze_grad_hook(grad):
+                        grad[combined_mask] = 0
+                        return grad
+
+                    weight.register_hook(freeze_grad_hook)
+                    
+    return model
+       
+ 
+ 
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters())
+ 
+def compute_flops_and_macs(model, input_size):
+    macs, params = get_model_complexity_info(model, input_size, as_strings=False, verbose=True)
+    # macs, params = profile(model, inputs=input_size)
+    
+    return macs, params
+       
+def model_size_in_mb(model):
+    torch.save(model.state_dict(), "temp.p")
+    size_mb = os.path.getsize("temp.p") / (1024 * 1024)  # Convert bytes to MB
+    os.remove("temp.p")
+    return size_mb
+       
+# Function to profile model
+def profile_model_during_training(model, input_size):
+    macs, params = compute_flops_and_macs(model, input_size)
+    size_mb = model_size_in_mb(model)
+
+    print(f"Params: {params}, MACs: {macs}, Size: {size_mb:.2f} MB")
+    return params, macs, size_mb                
+          
+          
+def fine_tuner(model, data_loader, num_epochs, prune_ratio, exp_name, LR=1e-3):
+
+    model = model.to(device)
+    model.train()
+
+    # Define loss function and optimizer
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=LR)
+
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=1e-5)
+    
+    train_losses = []
+    train_accuracies = []
+
+    # Fine-tuning loop
+    for epoch in range(num_epochs):
+        running_loss = 0.0
+        correct = 0
+        total = 0
+        for inputs, labels in data_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            
+            optimizer.zero_grad()
+            
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            
+            loss.backward()
+            optimizer.step()
+            
+            running_loss += loss.item() * inputs.size(0)
+            _, predicted = torch.max(outputs, 1)
+            correct += (predicted == labels).sum().item()
+            total += labels.size(0)
+
+        scheduler.step()
+            
+
+        
+        # Calculate average loss and accuracy for the epoch
+        epoch_loss = running_loss / len(data_loader.dataset)
+        epoch_accuracy = correct / total
+        train_losses.append(epoch_loss)
+        train_accuracies.append(epoch_accuracy)
+        
+        print(f"Epoch [{epoch+1}/{num_epochs}], "f"Train Loss: {epoch_loss:.4f}, Train Accuracy: {epoch_accuracy:.4f}")
+    
+    plot_curves(num_epochs, train_losses, train_accuracies, prune_ratio, exp_name)
+           
+    print("Fine-Tuning Complete")          
+             
+
     
 if __name__ == '__main__':
 
@@ -640,7 +959,6 @@ if __name__ == '__main__':
     exit()
     
     # Example usage
-    # Define a convolutional layer
     conv_layer = torch.nn.Conv2d(3, 6, kernel_size=3, bias=True)
 
     # Example pruning (randomly zero out some channels for demonstration)
@@ -648,16 +966,6 @@ if __name__ == '__main__':
         conv_layer.weight[0] = 0  # Set all weights in channel 0 to zero
         conv_layer.weight[2] = 0  # Set all weights in channel 2 to zero
 
-    # Save non-zero weights for output channels (dim=0)
-    nonzero_output_channels = save_nonzero_weights(conv_layer, dim=0)
-    print("Non-zero output channels weights:", nonzero_output_channels)
-
-    # Save non-zero weights for input channels (dim=1)
-    nonzero_input_channels = save_nonzero_weights(conv_layer, dim=1)
-    print("Non-zero input channels weights:", nonzero_input_channels)
-    
-    
-    
 
     # Prune conv1's output channels and use the same indices to prune conv2's input channels
     pruned_indices_conv1 = prune_conv_layer_dim0(model, 'conv1', amount=0.2, norm_type="L1")

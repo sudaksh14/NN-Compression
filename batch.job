@@ -12,7 +12,8 @@ echo "hello world"
 echo | date
 echo "Structural Pruning Experiments"
 
-python3 eval.py
+# python3 eval.py
+python3 adaptivity.py
 
-echo "Job Finished successfully"
+echo "Job Complete"
 echo | date

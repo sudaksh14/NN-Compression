@@ -1,4 +1,4 @@
-# ignores all .md files
+# ignore files
 
 *.onnx
 *.png

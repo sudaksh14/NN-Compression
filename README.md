@@ -1,1 +1,1 @@
-# NN-Compression
+# NN-Compression for Edge implementation

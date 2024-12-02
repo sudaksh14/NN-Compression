@@ -8,7 +8,6 @@ import matplotlib.pyplot as plt
 from torchsummary import summary
 from model_utils import *
 from pytorch_modelsize import SizeEstimator
-from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from tqdm import tqdm
 
 
@@ -18,13 +17,20 @@ print("Running on device:", device)
 
 data_dir = "./data/tiny-imagenet/tiny-imagenet-200"
 
-# print(torch.hub.list("chenyaofo/pytorch-cifar-models", force_reload=True))
+# print(torch.hub.list("chenyaofo/pytorch-cifar-models", force_reload=True))a
 
-# Define transformations for validation set
-transform = transforms.Compose([
-    transforms.Resize((32, 32)),
+# Define transformations for data augmentation
+train_transform = transforms.Compose([
+    transforms.RandomCrop(32, padding=4),
+    transforms.RandomHorizontalFlip(),
+    transforms.RandomRotation(15),
     transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010])
+])
+
+test_transform = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010])
 ])
 
 # Load the Tiny-ImageNet datasets
@@ -35,8 +41,8 @@ transform = transforms.Compose([
 # test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False, num_workers=4)
 
 # Load CIFAR-10 datasets
-train_dataset = datasets.CIFAR10(root='./data/Cifar-10', train=True, download=False, transform=transform)
-test_dataset = datasets.CIFAR10(root='./data/Cifar-10', train=False, download=False, transform=transform)
+train_dataset = datasets.CIFAR10(root='./data/Cifar-10', train=True, download=False, transform=train_transform)
+test_dataset = datasets.CIFAR10(root='./data/Cifar-10', train=False, download=False, transform=test_transform)
 
 train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=4)
 test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False, num_workers=4)
@@ -67,20 +73,15 @@ print(f"Number of Test samples: {len(test_dataset)}")
 
 
 def fine_tuner(model, data_loader, num_epochs, prune_ratio, exp_name, LR=1e-3):
-    # Set model to training mode
+
     model = model.to(device)
     model.train()
-
-    # Only fine-tune the classifier layer
-    # for param in model.parameters():
-    #     param.requires_grad = False
-        
-    # for param in model.fc.parameters():  # For models with `fc` as the classifier layer, like ResNet
-    #     param.requires_grad = True
 
     # Define loss function and optimizer
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=LR)
+
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=1e-5)
     
     train_losses = []
     train_accuracies = []
@@ -105,11 +106,13 @@ def fine_tuner(model, data_loader, num_epochs, prune_ratio, exp_name, LR=1e-3):
             _, predicted = torch.max(outputs, 1)
             correct += (predicted == labels).sum().item()
             total += labels.size(0)
+
+        scheduler.step()
             
 
         
         # Calculate average loss and accuracy for the epoch
-        epoch_loss = running_loss / len(train_loader.dataset)
+        epoch_loss = running_loss / len(data_loader.dataset)
         epoch_accuracy = correct / total
         train_losses.append(epoch_loss)
         train_accuracies.append(epoch_accuracy)
@@ -158,7 +161,7 @@ def pruner(exp_name, prune_amount=[0.1,0.3,0.5,0.7,0.9]):
         fine_tune_accuracy, fine_tune_f1_score = evaluate(rebuilt_model, test_loader, f"{exp_name}_Resnet_After_Fine-tune_{p}%")
         
         # Plot the results
-        plot_comparison(orig_accuracy, orig_f1_score, fine_tune_accuracy, fine_tune_f1_score, exp_name, p)
+        plot_comparison(orig_accuracy, orig_f1_score, fine_tune_accuracy, fine_tune_f1_score, exp_name, prune_ratio)
         
 
 def iterative_pruner(train_loader, test_loader, num_epochs, prune_ratio, exp_name):
@@ -250,7 +253,7 @@ def iterative_pruner(train_loader, test_loader, num_epochs, prune_ratio, exp_nam
                 
                 
                 
-def pruner_new(exp_name, prune_amount=[0.1,0.3,0.5,0.7,0.9]):
+def filter_pruning(exp_name, prune_amount=[0.1,0.3,0.5,0.7,0.9]):
     for prune_ratio in prune_amount:
         p = str(int(prune_ratio*100))
         print(f"Starting with Pruning ratio of {p}%")
@@ -326,7 +329,7 @@ def self_adaptive_CNN(exp_name, pruning_ratios=[0.3,0.5,0.7], path="./saves/stat
         print(f'Pruned Model Parameters: {final_params}')
         
         # Fine-Tune the pruned model
-        fine_tuner(pruned_model, train_loader, num_epochs=100, prune_ratio=p, exp_name=exp_name, LR=1e-1)
+        fine_tuner(pruned_model, train_loader, num_epochs=200, prune_ratio=p, exp_name=exp_name, LR=1e-2)
         fine_tune_accuracy, fine_tune_f1_score = evaluate(pruned_model, test_loader, f"{exp_name}_Resnet_After_Fine-tune_{p}%", device=device)
         moving_acc.append(fine_tune_accuracy)
         moving_f1.append(fine_tune_f1_score)
@@ -350,7 +353,7 @@ def self_adaptive_CNN(exp_name, pruning_ratios=[0.3,0.5,0.7], path="./saves/stat
             moving_acc.append(rebuilt_accuracy)
             moving_f1.append(rebuilt_f1_score)
 
-        plot_metrics(moving_acc, moving_f1, ticks=["Orig", "30%", "50%", "70%", "50%", "30%"], save_path="./plots/adaptive_metrics_plot.png")
+        plot_metrics(moving_acc, moving_f1, ticks=["Orig", "30%", "50%", "70%", "50%", "30%"], save_path=f"./plots/{exp_name}_metrics_plot.png")
             
             
             
@@ -367,8 +370,8 @@ if __name__ == '__main__':
     # iterative_pruner(train_loader, test_loader, 100, 0.2, "Iter_Prune")
     # Index_Aware_pruner(model, amount=0.2, plot=False)
     # non_zero_weights, new_channels = get_nonzero_indices(model)
-    # pruner_new("HighLR_Index_Aware_Pruning")
-    self_adaptive_CNN("Self_Adaptive_Trial_exp")
+    # filter_pruning("HighLR_Index_Aware_Pruning")
+    self_adaptive_CNN("Exp_Resnet_pruning_200ep")
     
         
     
