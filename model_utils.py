@@ -13,6 +13,7 @@ import numpy as np
 from ptflops import get_model_complexity_info
 from calflops import calculate_flops
 from thop import profile
+from torch.optim.lr_scheduler import StepLR, ExponentialLR, CyclicLR, CosineAnnealingLR
 
 
 
@@ -60,7 +61,6 @@ def plot_curves(num_epochs, train_losses, train_accuracies, prune_ratio, exp_nam
     # Plot Loss vs. Epoch
     plt.subplot(1, 2, 1)
     plt.plot(range(1, num_epochs + 1), train_losses, label='Train Loss')
-    # plt.plot(range(1, num_epochs + 1), val_losses, label='Validation Loss')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
     plt.title('Loss vs. Epoch')
@@ -69,13 +69,51 @@ def plot_curves(num_epochs, train_losses, train_accuracies, prune_ratio, exp_nam
     # Plot Accuracy vs. Epoch
     plt.subplot(1, 2, 2)
     plt.plot(range(1, num_epochs + 1), train_accuracies, label='Train Accuracy')
-    # plt.plot(range(1, num_epochs + 1), val_accuracies, label='Validation Accuracy')
     plt.xlabel('Epoch')
     plt.ylabel('Accuracy')
     plt.title('Accuracy vs. Epoch')
     plt.legend()
     
     plt.savefig(f"./plots/{exp_name}_Learning_Curve_Fine-Tuning_pruning_{str(int(prune_ratio*100))}")
+   
+   
+    
+def plot_curves_with_val(num_epochs, train_losses, train_accuracies, val_losses, val_accuracies, lrs, prune_ratio, exp_name):
+    
+    # Plot the training and validation loss curves
+    plt.figure(figsize=(16, 8))
+
+    # Plot Loss vs. Epoch
+    plt.subplot(2, 2, 1)
+    plt.plot(range(1, num_epochs + 1), train_losses, label='Train Loss')
+    plt.plot(range(1, num_epochs + 1), val_losses, label='Validation Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Loss vs. Epoch')
+    plt.legend()
+    plt.grid()
+
+    # Plot Accuracy vs. Epoch
+    plt.subplot(2, 2, 2)
+    plt.plot(range(1, num_epochs + 1), train_accuracies, label='Train Accuracy')
+    plt.plot(range(1, num_epochs + 1), val_accuracies, label='Validation Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.title('Accuracy vs. Epoch')
+    plt.legend()
+    plt.grid()
+    
+    plt.subplot(2, 1, 2)
+    plt.plot(range(1, num_epochs + 1), lrs, label='Learning Rate', color='purple', marker='o')
+    plt.title('Learning Rate vs Epochs')
+    plt.xlabel('Epochs')
+    plt.ylabel('Learning Rate')
+    plt.legend()
+    plt.grid()
+    
+    plt.tight_layout()
+    plt.savefig(f"./plots/{exp_name}_Learning_Curve_Fine-Tuning_pruning_{str(int(prune_ratio*100))}")
+
 
 
 # Plotting results
@@ -101,35 +139,27 @@ def plot_comparison_3stage(accuracy_list, exp_name, prune_ratio):
 def plot_profiling(params, macs, sizes, exp_name, prune_ratio):
     
     labels = ["Original", "Pruned", "Rebuilt"]
-    flops = [2 * mac for mac in macs]  # FLOPs
 
     # Create subplots
-    fig, axes = plt.subplots(4, 1, figsize=(10, 12), sharex=True)
+    fig, axes = plt.subplots(3, 1, figsize=(10, 12), sharex=True)
 
     # Plot Parameters
     axes[0].plot(labels, params, marker='o', color='blue', linestyle='-')
-    axes[0].set_title("Number of Parameters")
+    axes[0].set_title("Performance Parameters")
     axes[0].set_ylabel("Parameters")
     axes[0].grid(True, linestyle="--", alpha=0.5)
-
-    # Plot MACs
-    axes[1].plot(labels, macs, marker='s', color='cyan', linestyle='--')
-    axes[1].set_title("MACs")
-    axes[1].set_ylabel("MACs")
+    
+    # Plot Model Size
+    axes[1].plot(labels, sizes, marker='d', color='red', linestyle='-')
+    axes[1].set_title("Model Size (MB)")
+    axes[1].set_ylabel("Size (MB)")
     axes[1].grid(True, linestyle="--", alpha=0.5)
 
-    # Plot FLOPs
-    axes[2].plot(labels, flops, marker='^', color='green', linestyle=':')
-    axes[2].set_title("FLOPs")
-    axes[2].set_ylabel("FLOPs")
+    # Plot MACs
+    axes[2].plot(labels, macs, marker='s', color='cyan', linestyle='--')
+    axes[2].set_title("MACs")
+    axes[2].set_ylabel("MACs")
     axes[2].grid(True, linestyle="--", alpha=0.5)
-
-    # Plot Model Size
-    axes[3].plot(labels, sizes, marker='d', color='red', linestyle='-')
-    axes[3].set_title("Model Size (MB)")
-    axes[3].set_xlabel("Epochs")
-    axes[3].set_ylabel("Size (MB)")
-    axes[3].grid(True, linestyle="--", alpha=0.5)
 
     # Adjust layout
     plt.tight_layout()
@@ -858,9 +888,10 @@ def freeze_channels(model, channel_dict):
                     
                     mask_dim1 = torch.zeros_like(weight, dtype=torch.bool)
                     mask_dim1[:, dim1_channels, :, :] = True
-                    
+                                        
                     # Combine masks to handle both dim 0 and dim 1
                     combined_mask = mask_dim0 | mask_dim1
+                    print("layer_name:", name, combined_mask.shape)
                     
                     # Register a backward hook to ensure frozen channels' gradients are zeroed out
                     def freeze_grad_hook(grad):
@@ -897,7 +928,7 @@ def profile_model_during_training(model, input_size):
     return params, macs, size_mb                
           
           
-def fine_tuner(model, data_loader, num_epochs, prune_ratio, exp_name, LR=1e-3):
+def fine_tuner(model, train_loader, val_loader, num_epochs, scheduler_type, prune_ratio, exp_name, LR=1e-3):
 
     model = model.to(device)
     model.train()
@@ -905,18 +936,30 @@ def fine_tuner(model, data_loader, num_epochs, prune_ratio, exp_name, LR=1e-3):
     # Define loss function and optimizer
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=LR)
-
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=1e-5)
     
+    # Define LR scheduler
+    if scheduler_type == 'step':
+        scheduler = StepLR(optimizer, step_size=50, gamma=0.1)
+    elif scheduler_type == 'exponential':
+        scheduler = ExponentialLR(optimizer, gamma=0.95)
+    elif scheduler_type == 'cyclic':
+        scheduler = CyclicLR(optimizer, base_lr=1e-5, max_lr=0.01, step_size_up=20, mode='triangular2')
+    else:
+        scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=1e-5)
+        
+
     train_losses = []
     train_accuracies = []
+    val_losses = []
+    val_accuracies = []
+    lrs = []  # To track learning rates
 
     # Fine-tuning loop
     for epoch in range(num_epochs):
         running_loss = 0.0
         correct = 0
         total = 0
-        for inputs, labels in data_loader:
+        for inputs, labels in train_loader:
             inputs, labels = inputs.to(device), labels.to(device)
             
             optimizer.zero_grad()
@@ -932,19 +975,45 @@ def fine_tuner(model, data_loader, num_epochs, prune_ratio, exp_name, LR=1e-3):
             correct += (predicted == labels).sum().item()
             total += labels.size(0)
 
-        scheduler.step()
-            
-
-        
         # Calculate average loss and accuracy for the epoch
-        epoch_loss = running_loss / len(data_loader.dataset)
+        epoch_loss = running_loss / len(train_loader.dataset)
         epoch_accuracy = correct / total
         train_losses.append(epoch_loss)
         train_accuracies.append(epoch_accuracy)
         
-        print(f"Epoch [{epoch+1}/{num_epochs}], "f"Train Loss: {epoch_loss:.4f}, Train Accuracy: {epoch_accuracy:.4f}")
+        # Step the scheduler and track learning rate
+        scheduler.step()
+        current_lr = scheduler.get_last_lr()[0]
+        lrs.append(current_lr)
+        
+        # Validation loop
+        model.eval()
+        val_loss = 0
+        correct = 0
+        total = 0
+
+        with torch.no_grad():
+            for images, labels in val_loader:
+                images, labels = images.to(device), labels.to(device)
+
+                # Forward pass
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+
+                # Accumulate validation metrics
+                val_loss += loss.item() * images.size(0)
+                _, predicted = outputs.max(1)
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+
+        val_loss /= total
+        val_accuracy = correct / total
+        val_losses.append(val_loss)
+        val_accuracies.append(val_accuracy)
+        
+        print(f"Epoch [{epoch+1}/{num_epochs}], "f"Train Loss: {epoch_loss:.4f}, Train Accuracy: {epoch_accuracy:.4f}, Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_accuracy:.2f}, Learning Rate: {current_lr:.6f}")
     
-    plot_curves(num_epochs, train_losses, train_accuracies, prune_ratio, exp_name)
+    plot_curves_with_val(num_epochs, train_losses, train_accuracies, val_losses, val_accuracies, lrs, prune_ratio, exp_name)
            
     print("Fine-Tuning Complete")          
              

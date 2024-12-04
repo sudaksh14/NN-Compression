@@ -4,6 +4,11 @@ import torch.nn.utils.prune as prune
 import torch.nn.functional as F
 from torchvision.models import vit_b_16
 from torchsummary import summary
+import matplotlib.pyplot as plt
+import numpy as np
+
+
+"""
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Running on device:", device)
@@ -17,7 +22,6 @@ print(f"Number of parameters: {total_params}")
 
 print(vit_model.state_dict().keys())
 
-exit()
 
 # Structured Pruning Function using L2-Norm
 def str_pruning(model, layer_name, prune_ratio=0.5):
@@ -74,8 +78,38 @@ pruned_model = PrunedViT(vit_model, 1)
 
 total_params = sum(p.numel() for p in vit_model.parameters())
 print(f"Number of parameters: {total_params}")   
+"""
+
+def plot_dual(x, y1, y2):
+    fig, ax1 = plt.subplots()
+
+    # Plot data on the primary axis
+    ax1.plot(x, y1, 'b-', label='# Params (Millions)')
+    ax1.set_xlabel('Models')
+    ax1.set_xscale('linear')
+    ax1.set_yscale('log') 
+    ax1.set_ylabel('# Params (Millions)', color='b')
+    ax1.tick_params(axis='y', labelcolor='b')
+    
+    ax1.set_xticks(x)
+    ax1.set_xticklabels([val for val in x], rotation=30, fontsize=10)
+
+    # Create a secondary y-axis sharing the same x-axis
+    ax2 = ax1.twinx()
+    ax2.plot(x, y2, 'r--', label='Energy per Inference (Joules)')
+    ax2.set_ylabel('Energy per Inference (Joules)', color='r')
+    ax2.tick_params(axis='y', labelcolor='r')
+
+    # Show the plot
+    plt.title('Increment in Power Consumption')
+    plt.tight_layout() 
+    plt.savefig("./power_plot")
 
 
 
-
-
+if __name__ == '__main__':
+    
+    model_names = ["MobileNet-v2", "EfficientNet-B0", "ResNet-150", "VGG-16", "ViT-B/16", "BERT Base", "GPT-2 Medium", "GPT-3"]
+    params = [3.4,5.3,60,138,86,110,355,175000]
+    power = [0.1,0.2,0.6,1.5,1.2,2,6,30]
+    plot_dual(model_names, params, power)
