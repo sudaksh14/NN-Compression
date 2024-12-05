@@ -176,7 +176,7 @@ def iterative_pruner(train_loader, test_loader, num_epochs, prune_ratio, exp_nam
     optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
     
     # Cosine Annealing Warm Restarts scheduler with Adam
-    scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2)
+    scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2)
     
     # Iterative pruning and fine-tuning loop
     num_pruning_cycles = 3

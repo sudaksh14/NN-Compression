@@ -690,9 +690,7 @@ def get_nonzero_indices(model):
 def copy_weights(pruned_model, rebuilt_model, nonzero_channels):
     for name, module in pruned_model.named_modules():
         if isinstance(module, nn.Conv2d):
-            
             n=0
-        
             pruned_layer = module
             reduced_layer = dict(rebuilt_model.named_modules())[name]
             
@@ -710,7 +708,6 @@ def copy_weights(pruned_model, rebuilt_model, nonzero_channels):
 def copy_weights_from_dict(pruned_model, unpruned_weights):
     for name, module in pruned_model.named_modules():
         if isinstance(module, nn.Conv2d):
-            
             module.weight.data = unpruned_weights[name]
 
 
@@ -856,7 +853,7 @@ def reconstruct_weights_from_dicts(model, pruned_indices, pruned_weights, unprun
                        
                        
 
-def freeze_channels(model, channel_dict):
+def freeze_channels(model, channel_dict): 
     """
     Freeze specific channels in convolutional layers based on the provided channel dictionary.
 
@@ -873,33 +870,31 @@ def freeze_channels(model, channel_dict):
     Returns:
     - model: The modified model with specified channels frozen.
     """
+
+    def freeze_grad_hook(grad, mask):
+        grad_clone = grad.clone()
+        grad_clone[mask] = 0  # Freeze specific channel weights
+        return grad_clone
+
     for name, layer in model.named_modules():
         if isinstance(layer, nn.Conv2d) and name in channel_dict:
             freeze_info = channel_dict[name]
             dim0_channels = freeze_info.get("pruned_dim0", [])
             dim1_channels = freeze_info.get("pruned_dim1", [])
             
-            with torch.no_grad():
-                weight = layer.weight
-                if weight.requires_grad:
-                    # Create masks for the dimensions
-                    mask_dim0 = torch.zeros_like(weight, dtype=torch.bool)
-                    mask_dim0[dim0_channels, :, :, :] = True
-                    
-                    mask_dim1 = torch.zeros_like(weight, dtype=torch.bool)
-                    mask_dim1[:, dim1_channels, :, :] = True
-                                        
-                    # Combine masks to handle both dim 0 and dim 1
-                    combined_mask = mask_dim0 | mask_dim1
-                    print("layer_name:", name, combined_mask.shape)
-                    
-                    # Register a backward hook to ensure frozen channels' gradients are zeroed out
-                    def freeze_grad_hook(grad):
-                        grad[combined_mask] = 0
-                        return grad
+            weight = layer.weight
+            # Create masks for the dimensions
+            mask_dim0 = torch.zeros_like(weight, dtype=torch.bool)
+            mask_dim0[dim0_channels, :, :, :] = True
+            
+            mask_dim1 = torch.zeros_like(weight, dtype=torch.bool)
+            mask_dim1[:, dim1_channels, :, :] = True
+                                
+            # Combine masks to handle both dim 0 and dim 1
+            combined_mask = mask_dim0 | mask_dim1
 
-                    weight.register_hook(freeze_grad_hook)
-                    
+            weight.register_hook(lambda grad, mask=combined_mask: freeze_grad_hook(grad, mask))
+
     return model
        
  
@@ -931,7 +926,6 @@ def profile_model_during_training(model, input_size):
 def fine_tuner(model, train_loader, val_loader, num_epochs, scheduler_type, prune_ratio, exp_name, LR=1e-3):
 
     model = model.to(device)
-    model.train()
 
     # Define loss function and optimizer
     criterion = nn.CrossEntropyLoss()
@@ -956,7 +950,8 @@ def fine_tuner(model, train_loader, val_loader, num_epochs, scheduler_type, prun
 
     # Fine-tuning loop
     for epoch in range(num_epochs):
-        running_loss = 0.0
+        model.train()
+        train_loss = 0.0
         correct = 0
         total = 0
         for inputs, labels in train_loader:
@@ -970,13 +965,13 @@ def fine_tuner(model, train_loader, val_loader, num_epochs, scheduler_type, prun
             loss.backward()
             optimizer.step()
             
-            running_loss += loss.item() * inputs.size(0)
+            train_loss += loss.item() * inputs.size(0)
             _, predicted = torch.max(outputs, 1)
             correct += (predicted == labels).sum().item()
             total += labels.size(0)
 
         # Calculate average loss and accuracy for the epoch
-        epoch_loss = running_loss / len(train_loader.dataset)
+        epoch_loss = train_loss / len(train_loader.dataset)
         epoch_accuracy = correct / total
         train_losses.append(epoch_loss)
         train_accuracies.append(epoch_accuracy)
@@ -1014,6 +1009,7 @@ def fine_tuner(model, train_loader, val_loader, num_epochs, scheduler_type, prun
         print(f"Epoch [{epoch+1}/{num_epochs}], "f"Train Loss: {epoch_loss:.4f}, Train Accuracy: {epoch_accuracy:.4f}, Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_accuracy:.2f}, Learning Rate: {current_lr:.6f}")
     
     plot_curves_with_val(num_epochs, train_losses, train_accuracies, val_losses, val_accuracies, lrs, prune_ratio, exp_name)
+    del optimizer
            
     print("Fine-Tuning Complete")          
              
