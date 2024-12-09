@@ -13,7 +13,8 @@ echo | date
 echo "Structural Pruning Experiments"
 
 # python3 eval.py
-python3 adaptivity.py
+# python3 adaptivity.py
+python3 Parallel_Block_model.py
 
 echo "Job Complete"
 echo | date

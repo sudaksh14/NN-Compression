@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.optim.lr_scheduler import StepLR, ExponentialLR, CyclicLR, CosineAnnealingLR
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 import torch.nn.utils.prune as prune
@@ -13,7 +14,7 @@ import numpy as np
 from ptflops import get_model_complexity_info
 from calflops import calculate_flops
 from thop import profile
-from torch.optim.lr_scheduler import StepLR, ExponentialLR, CyclicLR, CosineAnnealingLR
+from deepspeed.profiling.flops_profiler import get_model_profile
 
 
 
@@ -115,7 +116,6 @@ def plot_curves_with_val(num_epochs, train_losses, train_accuracies, val_losses,
     plt.savefig(f"./plots/{exp_name}_Learning_Curve_Fine-Tuning_pruning_{str(int(prune_ratio*100))}")
 
 
-
 # Plotting results
 def plot_comparison(val_accuracy, val_f1_score, fine_tune_accuracy, fine_tune_f1_score, exp_name, prune_ratio):
     plt.figure(figsize=(8, 4))
@@ -126,14 +126,28 @@ def plot_comparison(val_accuracy, val_f1_score, fine_tune_accuracy, fine_tune_f1
     plt.title("Evaluation Metrics Before and After Fine-Tuning")
     plt.savefig(f"./plots/{exp_name}_Resnet20_Accuracy_Comparison_{str(int(prune_ratio*100))}")
     
+    
 def plot_comparison_3stage(accuracy_list, exp_name, prune_ratio):
     plt.figure(figsize=(10, 6))
-    plt.bar(['Accuracy Original', 'F1 Score Original', 'Accuracy Pruned', 'F1 Score Pruned', 'Accuracy Rebuilt', 'F1 Score Rebuilt'],
-            [*accuracy_list],
-            color=['skyblue', 'salmon', 'skyblue', 'salmon', 'skyblue', 'salmon'])
+    # Define labels and colors
+    labels = ['Accuracy Original', 'F1 Score Original', 'Accuracy Pruned', 
+              'F1 Score Pruned', 'Accuracy Rebuilt', 'F1 Score Rebuilt']
+    colors = ['skyblue', 'salmon', 'skyblue', 'salmon', 'skyblue', 'salmon']
+    
+    # Create the bar plot
+    bar_positions = range(len(accuracy_list))
+    plt.bar(bar_positions, accuracy_list, color=colors)
+    
+    # Add metric values on top of the bars
+    for i, value in enumerate(accuracy_list):
+        plt.text(i, value + 0.01, f"{value:.2f}", ha='center', va='bottom', fontsize=10)
+    
+    # Add labels, title, and save the plot
+    plt.xticks(bar_positions, labels, rotation=15, fontsize=10)
     plt.ylabel("Metrics")
     plt.title("Evaluation Metrics for Pruning and Rebuilding")
-    plt.savefig(f"./plots/{exp_name}_Resnet20_Accuracy_Comparison_{str(int(prune_ratio*100))}")
+    plt.tight_layout()
+    plt.savefig(f"./plots/{exp_name}_Resnet20_Accuracy_Comparison_{str(int(prune_ratio*100))}.png")
     
 
 def plot_profiling(params, macs, sizes, exp_name, prune_ratio):
@@ -198,7 +212,7 @@ def evaluate(model, data_loader, plot_title="Test Accuracy & F1-Score", device=d
         plt.savefig(f"./plots/{plot_title}")
         
     if profiling:
-        params, mac, size_mb = profile_model_during_training(model, (3,32,32))
+        params, mac, size_mb = profile_model_during_training(model, (1,3,32,32))
         return accuracy, f1, params, mac, size_mb
         
     return accuracy, f1
@@ -916,10 +930,11 @@ def model_size_in_mb(model):
        
 # Function to profile model
 def profile_model_during_training(model, input_size):
-    macs, params = compute_flops_and_macs(model, input_size)
+    # macs, params = compute_flops_and_macs(model, input_size)
+    flops, macs, params = get_model_profile(model=model, input_shape=input_size, print_profile=True, as_string=False)
     size_mb = model_size_in_mb(model)
 
-    print(f"Params: {params}, MACs: {macs}, Size: {size_mb:.2f} MB")
+    print(f"Params: {params / 1e6:.3f} M, MACs: {macs / 1e9:.3f} GMACs, FLOPs: {flops / 1e9:.3f} GFLOPs, Size: {size_mb:.2f} MB")
     return params, macs, size_mb                
           
           

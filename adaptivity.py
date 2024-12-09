@@ -6,23 +6,45 @@ import torch.nn.functional as F
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader, random_split
 from model_utils import *
+import numpy as np
+import matplotlib.pyplot as plt
+from data_augmentation import ImgAugTransform
 
 
 # Set device for training and evaluation
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Running on device:", device)
 
-transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010])
-])
+Data_Augmentation = True
 
-full_dataset = datasets.CIFAR10(root='./data/Cifar-10', train=True, download=False, transform=transform)
+
+if Data_Augmentation:
+    train_transform = transforms.Compose([
+        ImgAugTransform(),  # Apply ImgAug augmentations
+        transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010])
+    ])
+    
+    test_transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010])
+    ])
+    
+    full_dataset = datasets.CIFAR10(root='./data/Cifar-10', train=True, download=False, transform=train_transform)
+    test_dataset = datasets.CIFAR10(root='./data/Cifar-10', train=False, download=False, transform=test_transform)
+    
+    
+else:
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010])
+    ])
+    
+    full_dataset = datasets.CIFAR10(root='./data/Cifar-10', train=True, download=False, transform=transform)
+    test_dataset = datasets.CIFAR10(root='./data/Cifar-10', train=False, download=False, transform=transform)
+
+
 # Load CIFAR-10 datasets
-# train_dataset = datasets.CIFAR10(root='./data/Cifar-10', train=True, download=False, transform=transform)
-test_dataset = datasets.CIFAR10(root='./data/Cifar-10', train=False, download=False, transform=transform)
 
-# train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=4)
 test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False, num_workers=4)
 
 # Split into training and validation sets
@@ -32,8 +54,6 @@ train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
 
 train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
-
-
 
 print(f"Number of Train samples: {len(train_dataset)}")
 print(f"Number of Val samples: {len(val_dataset)}")
@@ -76,12 +96,11 @@ def adaptivity_CNN(original_model, scheduler, prune_ratio=0.5, exp_name="ToyExp_
 
 if __name__ == '__main__':
     
-    
     schedulers = ['cosine', 'step', 'exponential', 'cyclic']
     for sch in schedulers:
         # Load a pre-trained model
         orig_model = torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_resnet20", pretrained=True).to(device)
-        adaptivity_CNN(orig_model, scheduler=sch, exp_name=f"Exp_adaptivity_{sch}")
+        adaptivity_CNN(orig_model, scheduler=sch, exp_name=f"Exp_adaptivity_DA_{sch.upper()}")
 
     print(f"{"-"*20}EXPERIMENT FINISHED{"-"*20}")
         
