@@ -81,7 +81,13 @@ class ParallelBlockModel(nn.Module):
 
 
 if __name__ == "__main__":
-
+    
+    # Set device for training and evaluation
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("Running on device:", device)
+    
+    pretrained = True
+    
     num_blocks = 3  # Number of Custom/Parallel blocks
     in_channels = 3  # Input image channels (e.g., RGB)
     out_channels = [16,32,64,128]  # Number of output channels in each custom block
@@ -119,6 +125,12 @@ if __name__ == "__main__":
     print(f"Number of Val samples: {len(val_dataset)}")
     print(f"Number of Test samples: {len(test_dataset)}")
     
-    fine_tuner(model, train_loader, val_loader, num_epochs=200, scheduler_type="cosine", prune_ratio=0.5, exp_name="PBM_CIFAR-10_FROM_SCRATCH", LR=0.1)
-    torch.save(model.state_dict(), "./saves/state_dicts/PBM_cifar10.pth")
-    torch.onnx.export(model, (torch.randn(1, in_channels, 32, 32).to(device),), f=f"./saves/onnx/PBM_cifar10.onnx")
+    if pretrained:
+        model.load_state_dict(torch.load("./saves/state_dicts/PBM_cifar10.pth", weights_only=True))
+        test_acc, test_f1 = evaluate(model, test_loader, plot_title="PBM_CIFAR10_FROM_SCRATCH_EVAL ", device=device, plot=True)
+    else:
+        fine_tuner_tqdm(model, train_loader, val_loader, num_epochs=200, scheduler_type="cosine", prune_ratio=0.5, exp_name="PBM_CIFAR-10_FROM_SCRATCH", LR=0.1)
+        torch.save(model.state_dict(), "./saves/state_dicts/PBM_cifar10.pth")
+        torch.onnx.export(model, (torch.randn(1, in_channels, 32, 32).to(device),), f=f"./saves/onnx/PBM_cifar10.onnx")
+    
+    

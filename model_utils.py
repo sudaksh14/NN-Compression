@@ -15,6 +15,7 @@ from ptflops import get_model_complexity_info
 from calflops import calculate_flops
 from thop import profile
 from deepspeed.profiling.flops_profiler import get_model_profile
+from tqdm import tqdm
 
 
 
@@ -148,11 +149,52 @@ def plot_comparison_3stage(accuracy_list, exp_name, prune_ratio):
     plt.title("Evaluation Metrics for Pruning and Rebuilding")
     plt.tight_layout()
     plt.savefig(f"./plots/{exp_name}_Resnet20_Accuracy_Comparison_{str(int(prune_ratio*100))}.png")
+
+
+def plot_multilevel(accuracies, f1_scores, exp_name, labels = ["Original", "Level-4", "Level-3", "Level-2", "Level-1"]):
+    if len(accuracies) != len(f1_scores) or len(accuracies) != len(labels):
+        raise ValueError("accuracies, f1_scores, and labels must have the same length.")
+
+    plt.figure(figsize=(10, 6))
+    
+    # Plot Accuracy
+    plt.plot(
+        range(1, len(accuracies) + 1),
+        accuracies,
+        marker="o",
+        label="Accuracy",
+        color="blue"
+    )
+    # Annotate Accuracy Points
+    for i, (acc, label) in enumerate(zip(accuracies, labels)):
+        plt.text(i + 1, acc, f"{label}\n{acc:.2f}", fontsize=9, ha="center", color="blue")
+
+    # Plot F1 Score
+    plt.plot(
+        range(1, len(f1_scores) + 1),
+        f1_scores,
+        marker="s",
+        linestyle="--",
+        label="F1 Score",
+        color="green"
+    )
+    # Annotate F1 Score Points
+    for i, (f1, label) in enumerate(zip(f1_scores, labels)):
+        plt.text(i + 1, f1, f"{label}\n{f1:.2f}", fontsize=9, ha="center", color="green")
+
+    # Configure Plot
+    plt.title("Accuracy and F1 Score with Labels", fontsize=16)
+    plt.xlabel("Model Size", fontsize=14)
+    plt.ylabel("Metric Value", fontsize=14)
+    plt.xticks(range(1, len(accuracies) + 1), fontsize=12)
+    plt.yticks(fontsize=12)
+    plt.grid(alpha=0.5)
+    plt.legend(fontsize=12)
+    plt.tight_layout()
+    plt.savefig(f"./plots/{exp_name}_Resnet20_Rebuilt_performance.png")
     
 
-def plot_profiling(params, macs, sizes, exp_name, prune_ratio):
-    
-    labels = ["Original", "Pruned", "Rebuilt"]
+def plot_profiling(params, macs, sizes, exp_name, prune_ratio, labels = ["Original", "Pruned", "Rebuilt"]):
 
     # Create subplots
     fig, axes = plt.subplots(3, 1, figsize=(10, 12), sharex=True)
@@ -179,7 +221,7 @@ def plot_profiling(params, macs, sizes, exp_name, prune_ratio):
     plt.tight_layout()
 
     # Save and show the plot
-    plt.savefig(f"./plots/{exp_name}_Performance_Metrics_{str(int(prune_ratio*100))}")
+    plt.savefig(f"./plots/{exp_name}_Profiling_Metrics_{str(int(prune_ratio*100))}")
     
     
 def evaluate(model, data_loader, plot_title="Test Accuracy & F1-Score", device=device, plot=False, profiling=False):
@@ -832,6 +874,24 @@ def extend_channels(model, pruned_dict):
     return new_channel_dict
 
 
+def get_rebuild_channels(unpruned_channels, pruned_channels):
+    new_channels_dict = {}
+    for name, weight in pruned_channels.items():
+        new_in_channels = int(unpruned_channels[name][0] + pruned_channels[name][0])
+        new_out_channels = int(unpruned_channels[name][1] + pruned_channels[name][1])
+        
+        new_channels_dict[name] = (new_in_channels, new_out_channels)
+        
+    return new_channels_dict
+        
+
+
+def get_core_weights(pruned_model, unpruned_weights):
+    for name, module in pruned_model.named_modules():
+        if isinstance(module, nn.Conv2d):
+            unpruned_weights[name] = module.weight.data
+
+
 
 def reconstruct_weights_from_dicts(model, pruned_indices, pruned_weights, unpruned_indices, unpruned_weights):
     """
@@ -938,7 +998,7 @@ def profile_model_during_training(model, input_size):
     return params, macs, size_mb                
           
           
-def fine_tuner(model, train_loader, val_loader, num_epochs, scheduler_type, prune_ratio, exp_name, LR=1e-3):
+def fine_tuner(model, train_loader, val_loader, num_epochs, scheduler_type, prune_ratio, exp_name, device=device, LR=1e-3):
 
     model = model.to(device)
 
@@ -1028,6 +1088,98 @@ def fine_tuner(model, train_loader, val_loader, num_epochs, scheduler_type, prun
            
     print("Fine-Tuning Complete")          
              
+
+def fine_tuner_tqdm(model, train_loader, val_loader, num_epochs, scheduler_type, prune_ratio, exp_name, device=device, LR=1e-3):
+
+    model = model.to(device)
+
+    # Define loss function and optimizer
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=LR)
+    
+    # Define LR scheduler
+    if scheduler_type == 'step':
+        scheduler = StepLR(optimizer, step_size=50, gamma=0.1)
+    elif scheduler_type == 'exponential':
+        scheduler = ExponentialLR(optimizer, gamma=0.95)
+    elif scheduler_type == 'cyclic':
+        scheduler = CyclicLR(optimizer, base_lr=1e-5, max_lr=0.01, step_size_up=20, mode='triangular2')
+    else:
+        scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=1e-5)
+        
+
+    train_losses = []
+    train_accuracies = []
+    val_losses = []
+    val_accuracies = []
+    lrs = []  # To track learning rates
+
+    # Fine-tuning loop
+    for epoch in tqdm(range(num_epochs), desc="Epochs"):
+        model.train()
+        train_loss = 0.0
+        correct = 0
+        total = 0
+        for inputs, labels in train_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            
+            optimizer.zero_grad()
+            
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            
+            loss.backward()
+            optimizer.step()
+            
+            train_loss += loss.item() * inputs.size(0)
+            _, predicted = torch.max(outputs, 1)
+            correct += (predicted == labels).sum().item()
+            total += labels.size(0)
+
+        # Calculate average loss and accuracy for the epoch
+        epoch_loss = train_loss / len(train_loader.dataset)
+        epoch_accuracy = correct / total
+        train_losses.append(epoch_loss)
+        train_accuracies.append(epoch_accuracy)
+        
+        # Step the scheduler and track learning rate
+        scheduler.step()
+        current_lr = scheduler.get_last_lr()[0]
+        lrs.append(current_lr)
+        
+        # Validation loop
+        model.eval()
+        val_loss = 0
+        correct = 0
+        total = 0
+
+        with torch.no_grad():
+            for images, labels in val_loader:
+                images, labels = images.to(device), labels.to(device)
+
+                # Forward pass
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+
+                # Accumulate validation metrics
+                val_loss += loss.item() * images.size(0)
+                _, predicted = outputs.max(1)
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+
+        val_loss /= total
+        val_accuracy = correct / total
+        val_losses.append(val_loss)
+        val_accuracies.append(val_accuracy)
+        
+        print(f"Epoch [{epoch+1}/{num_epochs}], "f"Train Loss: {epoch_loss:.4f}, Train Accuracy: {epoch_accuracy:.4f}, Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_accuracy:.2f}, Learning Rate: {current_lr:.6f}")
+    
+    plot_curves_with_val(num_epochs, train_losses, train_accuracies, val_losses, val_accuracies, lrs, prune_ratio, exp_name)
+    del optimizer
+           
+    print("Fine-Tuning Complete")          
+   
+
 
     
 if __name__ == '__main__':

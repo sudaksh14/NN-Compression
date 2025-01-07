@@ -14,7 +14,8 @@ echo "Structural Pruning Experiments"
 
 # python3 eval.py
 # python3 adaptivity.py
-python3 Parallel_Block_model.py
+# python3 Parallel_Block_model.py
+python3 iterative_pruner.py
 
 echo "Job Complete"
 echo | date

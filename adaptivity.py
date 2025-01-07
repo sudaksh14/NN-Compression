@@ -66,7 +66,7 @@ def adaptivity_CNN(original_model, scheduler, prune_ratio=0.5, exp_name="ToyExp_
     acc_original, f1_original, params_original, mac_original, size_mb_original = evaluate(original_model, test_loader, profiling=True)
             
     # Apply pruning
-    Index_Aware_pruner(original_model, amount=prune_ratio, plot=False)
+    Index_Aware_pruner(original_model, amount=prune_ratio, plot=False) # Replace with Depgraph Pruner
 
     zero_channels_info, num_pruned_channels, pruned_weights = get_pruned_indices_and_counts(original_model)
     non_zero_channels_info, num_unpruned_channels, unpruned_weights = get_unpruned_indices_and_counts(original_model)
@@ -80,9 +80,9 @@ def adaptivity_CNN(original_model, scheduler, prune_ratio=0.5, exp_name="ToyExp_
 
     new_channels = extend_channels(core_model, num_pruned_channels)
     rebuilt_model = Resnet_General(new_channels).to(device)
+    get_core_weights(core_model, unpruned_weights)
     del core_model
 
-    #TODO : Replace the unpruned weights with fine-tuned core model weights
     rebuilt_model = reconstruct_weights_from_dicts(rebuilt_model, pruned_indices=zero_channels_info, pruned_weights=pruned_weights, unpruned_indices=non_zero_channels_info, unpruned_weights=unpruned_weights)
     rebuilt_model = freeze_channels(rebuilt_model, non_zero_channels_info)
 
@@ -100,7 +100,7 @@ if __name__ == '__main__':
     for sch in schedulers:
         # Load a pre-trained model
         orig_model = torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_resnet20", pretrained=True).to(device)
-        adaptivity_CNN(orig_model, scheduler=sch, exp_name=f"Exp_adaptivity_DA_{sch.upper()}")
+        adaptivity_CNN(orig_model, scheduler=sch, exp_name=f"Exp_01_adaptivity_DA_{sch.upper()}")
 
     print(f"{"-"*20}EXPERIMENT FINISHED{"-"*20}")
         
