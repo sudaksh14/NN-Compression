@@ -11,10 +11,10 @@ from sklearn.metrics import accuracy_score, f1_score
 import os
 import pickle
 import numpy as np
-from data_augmentation import ImgAugTransform
 from utils.eval_utils import *
 from utils.visualize_utils import *
 from utils.prune_utils import *
+from utils.train_utils import *
 from models.Resnet import *
 
 
@@ -124,7 +124,7 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
             rebuilt_model = reconstruct_weights_from_dicts(rebuilt_model, pruned_indices=prune_meta_data[i]["zero_channels_info"], pruned_weights=prune_meta_data[i]["pruned_weights"], unpruned_indices=unprune_meta_data[i]["non_zero_channels_info"], unpruned_weights=unprune_meta_data[i]["unpruned_weights"])
             rebuilt_model = freeze_channels(rebuilt_model, unprune_meta_data[i]["non_zero_channels_info"])
             
-            # fine_tuner(rebuilt_model, train_loader, val_loader, num_epochs=200, scheduler_type=scheduler, prune_ratio=0.3, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=1e-2)
+            fine_tuner(rebuilt_model, train_loader, val_loader, num_epochs=200, scheduler_type=scheduler, prune_ratio=0.3, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=1e-2)
             acc_rebuilt, f1_rebuilt, params_rebuilt, mac_rebuilt, size_mb_rebuilt = evaluate(rebuilt_model, test_loader, profiling=True)
             torch.onnx.export(rebuilt_model, (torch.randn(1, 3, 32, 32).to(device),), f=f"./saves/onnx/Resnet20_Descendant_Model_Level-{i+1}.onnx")
             core_model = rebuilt_model

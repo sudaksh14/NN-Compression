@@ -8,10 +8,10 @@ from torch.utils.data import DataLoader, random_split
 from utils.eval_utils import *
 from utils.visualize_utils import *
 from utils.prune_utils import *
+from utils.train_utils import *
 from models.Resnet import *
 import numpy as np
 import matplotlib.pyplot as plt
-from data_augmentation import ImgAugTransform
 
 
 # Set device for training and evaluation
