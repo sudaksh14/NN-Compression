@@ -1,0 +1,89 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class VGG(nn.Module):
+
+    """
+        Generalized VGG model.
+        
+        Args:
+        - conv_config: A dictionary where each key is the block number (1-indexed) and the value
+                       is a list of integers representing the number of filters in each conv layer.
+        - num_classes: Number of output classes for the classifier.
+        - input_channels: Number of input channels (e.g., 3 for RGB images).
+        """
+
+    def __init__(
+        self,
+        conv_config,
+        num_classes: int = 10,
+        init_weights: bool = False,
+        input_channels=3
+    ) -> None:
+        super(VGG, self).__init__()
+        self.features = self._make_layers(conv_config, input_channels)
+        self.classifier = nn.Sequential(
+            nn.Linear(512, 512),
+            nn.ReLU(True),
+            nn.Dropout(),
+            nn.Linear(512, 512),
+            nn.ReLU(True),
+            nn.Dropout(),
+            nn.Linear(512, num_classes),
+        )
+        if init_weights:
+            self._initialize_weights()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.features(x)
+        x = torch.flatten(x, 1)
+        x = self.classifier(x)
+        return x
+
+    def _make_layers(self, conv_config, input_channels):
+        layers = []
+        for block_idx, filters in conv_config.items():
+            for out_channels in filters:
+                layers.append(nn.Conv2d(input_channels, out_channels, kernel_size=3, padding=1))
+                layers.append(nn.BatchNorm2d(out_channels))
+                layers.append(nn.ReLU(inplace=True))
+                input_channels = out_channels  # Update input channels for next layer
+            layers.append(nn.MaxPool2d(kernel_size=2, stride=2))  # Add max pooling after each block
+        return nn.Sequential(*layers)
+
+    def _initialize_weights(self) -> None:
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.normal_(m.weight, 0, 0.01)
+                nn.init.constant_(m.bias, 0)
+
+
+if __name__ == "__main__":
+    # Define configuration for VGG16 with Batch Normalization
+    conv_config = {
+        1: [64, 64],        # Block 1: Two conv layers with 64 filters
+        2: [128, 128],      # Block 2: Two conv layers with 128 filters
+        3: [256, 256, 256], # Block 3: Three conv layers with 256 filters
+        4: [512, 512, 512], # Block 4: Three conv layers with 512 filters
+        5: [512, 512, 512]  # Block 5: Three conv layers with 512 filters
+    }
+
+    # Instantiate the model
+    model = VGG(conv_config)
+
+    # Print the model
+    print(model)
+
+    # Test with a dummy input
+    input_tensor = torch.randn(1, 3, 32, 32)  # Batch size 1, 3 color channels, 224x224 resolution
+    output = model(input_tensor)
+    print("Output shape:", output.shape)

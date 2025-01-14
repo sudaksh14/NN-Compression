@@ -6,7 +6,10 @@ from torchvision import datasets, models, transforms
 from sklearn.metrics import accuracy_score, f1_score
 import matplotlib.pyplot as plt
 from torchsummary import summary
-from model_utils import *
+from utils.eval_utils import *
+from utils.visualize_utils import *
+from utils.prune_utils import *
+from models.Resnet import *
 from pytorch_modelsize import SizeEstimator
 from tqdm import tqdm
 

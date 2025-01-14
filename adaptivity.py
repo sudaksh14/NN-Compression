@@ -5,7 +5,10 @@ import torch.nn.utils.prune as prune
 import torch.nn.functional as F
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader, random_split
-from model_utils import *
+from utils.eval_utils import *
+from utils.visualize_utils import *
+from utils.prune_utils import *
+from models.Resnet import *
 import numpy as np
 import matplotlib.pyplot as plt
 from data_augmentation import ImgAugTransform
@@ -73,10 +76,10 @@ def adaptivity_CNN(original_model, scheduler, prune_ratio=0.5, exp_name="ToyExp_
 
     core_model = Resnet_General(num_unpruned_channels).to(device)
     copy_weights_from_dict(core_model, unpruned_weights)
-    print("DONE REBUILDING")
 
     fine_tuner(core_model, train_loader, val_loader, num_epochs=200, scheduler_type=scheduler, prune_ratio=0.5, exp_name=f"{exp_name}_Training_core_model", LR=1e-2)
     acc_pruned, f1_pruned, params_pruned, mac_pruned, size_mb_pruned = evaluate(core_model, test_loader, profiling=True)
+    print("DONE PRUNING")
 
     new_channels = extend_channels(core_model, num_pruned_channels)
     rebuilt_model = Resnet_General(new_channels).to(device)
