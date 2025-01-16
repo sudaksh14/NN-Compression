@@ -11,9 +11,9 @@ from sklearn.metrics import accuracy_score, f1_score
 import os
 import pickle
 import numpy as np
-from tqdm import tqdm
 from utils.eval_utils import *
 from utils.visualize_utils import *
+from models.Resnet import *
 
 
 
@@ -375,14 +375,14 @@ def get_unpruned_indices_and_counts(model):
             pruned_dim0 = torch.nonzero(weights.abs().sum(dim=(1, 2, 3)) > 0).squeeze().tolist()
             if isinstance(pruned_dim0, int):  # Handle single index case
                 pruned_dim0 = [pruned_dim0]
-            layer_info['pruned_dim0'] = pruned_dim0
+            layer_info['unpruned_dim0'] = pruned_dim0
             
             
             # Identify pruned filters along dim=1 (input channels)
             pruned_dim1 = torch.nonzero(weights.abs().sum(dim=(0, 2, 3)) > 0).squeeze().tolist()
             if isinstance(pruned_dim1, int):  # Handle single index case
                 pruned_dim1 = [pruned_dim1]
-            layer_info['pruned_dim1'] = pruned_dim1
+            layer_info['unpruned_dim1'] = pruned_dim1
         
             non_pruned_info[name] = layer_info
             num_unpruned_channels[name] = (len(pruned_dim0), len(pruned_dim1))
@@ -460,50 +460,110 @@ def reconstruct_weights_from_dicts(model, pruned_indices, pruned_weights, unprun
                        
                        
 
-def freeze_channels(model, channel_dict): 
-    """
-    Freeze specific channels in convolutional layers based on the provided channel dictionary.
-
-    Parameters:
-    - model: The PyTorch model (e.g., ResNet-20).
-    - channel_dict: A dictionary where keys are layer names, and values are dicts specifying
-                    channels to freeze for dim 0 (output channels) and dim 1 (input channels).
-                    Example:
-                        {
-                            "layer1.0.conv1": {"dim0": [0, 1], "dim1": [2, 3]},
-                            "layer2.0.conv1": {"dim0": [4], "dim1": [1, 6]}
-                        }
-
-    Returns:
-    - model: The modified model with specified channels frozen.
-    """
-
-    def freeze_grad_hook(grad, mask):
-        grad_clone = grad.clone()
-        grad_clone[mask] = 0  # Freeze specific channel weights
-        return grad_clone
-
+def freeze_channels(model, freeze_dict):
     for name, layer in model.named_modules():
-        if isinstance(layer, nn.Conv2d) and name in channel_dict:
-            freeze_info = channel_dict[name]
-            dim0_channels = freeze_info.get("pruned_dim0", [])
-            dim1_channels = freeze_info.get("pruned_dim1", [])
-            
-            weight = layer.weight
-            # Create masks for the dimensions
-            mask_dim0 = torch.zeros_like(weight, dtype=torch.bool)
-            mask_dim0[dim0_channels, :, :, :] = True
-            
-            mask_dim1 = torch.zeros_like(weight, dtype=torch.bool)
-            mask_dim1[:, dim1_channels, :, :] = True
-                                
-            # Combine masks to handle both dim 0 and dim 1
-            combined_mask = mask_dim0 | mask_dim1
+        if isinstance(layer, nn.Conv2d):  # Only target Conv2D layers
+            if name in freeze_dict:
+                # Retrieve the frozen indices for dim0 (channels) and dim1 (spatial filters)
+                frozen_dim0_indices = freeze_dict[name].get('unpruned_dim0', [])
+                frozen_dim1_indices = freeze_dict[name].get('unpruned_dim1', [])
+                
+                # Freeze channels by setting requires_grad=False
+                for idx in frozen_dim0_indices:
+                    # Freeze the channels (dim 0)
+                    layer.weight.data[idx].requires_grad = False
+                    if layer.bias is not None:
+                        layer.bias[idx].requires_grad = False
 
-            weight.register_hook(lambda grad, mask=combined_mask: freeze_grad_hook(grad, mask))
+                for idx in frozen_dim1_indices:
+                    # Freeze the spatial filters (dim 1)
+                    layer.weight.data[:, idx, :, :].requires_grad = False
 
     return model
 
+
+def freeze_channels_2d(model, channel_indices):
+    """
+    Freezes specific channels in both `dim 0` (output channels) and `dim 1` (input channels) for the specified layers.
+
+    Args:
+        model: The model (e.g., ResNet18).
+        channel_indices: A dictionary with layer names as keys and a dictionary with 'dim0' and 'dim1' indices to freeze.
+    """
+    def freeze_grad_hook(grad, frozen_dim0, frozen_dim1):
+        """
+        Zero out gradients for the specified indices in both dimensions.
+        """
+        grad[frozen_dim0, :, :, :] = 0  # Freeze dim 0
+        grad[:, frozen_dim1, :, :] = 0  # Freeze dim 1
+        return grad
+
+    for name, layer in model.named_modules():
+        if isinstance(layer, nn.Conv2d) and name in channel_indices:
+            indices = channel_indices[name]
+            frozen_dim0 = indices.get('unpruned_dim0', [])
+            frozen_dim1 = indices.get('unpruned_dim1', [])
+            
+            if layer.weight.requires_grad:
+                # Register hook to zero gradients in both dimensions
+                layer.weight.register_hook(
+                    lambda grad, frozen_dim0=frozen_dim0, frozen_dim1=frozen_dim1: freeze_grad_hook(grad, frozen_dim0, frozen_dim1)
+                )
+            
+            # If the layer has bias, freeze only corresponding to `dim0` since biases don't have `dim1`
+            if layer.bias is not None and layer.bias.requires_grad:
+                layer.bias.register_hook(lambda grad, frozen_dim0=frozen_dim0: grad.index_fill_(0, torch.tensor(frozen_dim0, device=grad.device), 0))
+
+    return model
+
+
+def validate_frozen_channels(model, channel_indices):
+    """
+    Validate that the specified channels in the model are frozen.
+
+    Args:
+        model: The model with frozen channels.
+        channel_indices: A dictionary with layer names and indices for `dim0` and `dim1`.
+
+    Returns:
+        A boolean indicating whether the specified channels are frozen.
+    """
+    # all_frozen = True
+
+    for name, layer in model.named_modules():
+        if isinstance(layer, nn.Conv2d) and name in channel_indices:
+            indices = channel_indices[name]
+            frozen_dim0 = indices.get('unpruned_dim0', [])
+            frozen_dim1 = indices.get('unpruned_dim1', [])
+
+            if layer.weight.grad is None:
+                print(name)
+            
+            if layer.weight.grad is not None:
+                grad = layer.weight.grad
+                
+                # Validate dim0 gradients
+                dim0_frozen = grad[frozen_dim0, :, :, :].abs().sum().item() == 0
+                if not dim0_frozen:
+                    print(f"Dim 0 not frozen for {name}: Indices {frozen_dim0}")
+                
+                # Validate dim1 gradients
+                dim1_frozen = grad[:, frozen_dim1, :, :].abs().sum().item() == 0
+                if not dim1_frozen:
+                    print(f"Dim 1 not frozen for {name}: Indices {frozen_dim1}")
+
+                # all_frozen = all_frozen and dim0_frozen and dim1_frozen
+                all_frozen = dim0_frozen and dim1_frozen
+
+            # Validate bias if it exists
+            if layer.bias is not None and layer.bias.grad is not None:
+                bias_grad = layer.bias.grad
+                dim0_bias_frozen = bias_grad[frozen_dim0].abs().sum().item() == 0
+                if not dim0_bias_frozen:
+                    print(f"Bias not frozen for {name}: Indices {frozen_dim0}")
+                all_frozen = all_frozen and dim0_bias_frozen
+
+    return all_frozen
 
 
     

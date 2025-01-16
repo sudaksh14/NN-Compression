@@ -16,6 +16,7 @@ from utils.visualize_utils import *
 from utils.prune_utils import *
 from utils.train_utils import *
 from models.Resnet import *
+from models.VGG import *
 
 
 
@@ -67,10 +68,9 @@ print(f"Number of Train samples: {len(train_dataset)}")
 print(f"Number of Val samples: {len(val_dataset)}")
 print(f"Number of Test samples: {len(test_dataset)}")
 
-# original_model = torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_resnet20", pretrained=True).to(device)
-original_model = torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_vgg16_bn", pretrained=True).to(device)
+original_model = torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_resnet20", pretrained=True).to(device)
+# original_model = torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_vgg16_bn", pretrained=True).to(device)
 # torch.onnx.export(original_model, (torch.randn(1, 3, 32, 32).to(device),), f=f"./saves/onnx/VGG16_Original_Model.onnx")
-exit()
    
 def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3, 0.3, 0.3], exp_name="ToyExp_Iter_Adaptivity_Resnet20", rebuild=True):
     
@@ -105,13 +105,14 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
         core_model = Resnet_General(unprune_meta_data[-1]["num_unpruned_channels"]).to(device)
         copy_weights_from_dict(core_model, unprune_meta_data[-1]["unpruned_weights"])
     
-    # fine_tuner(core_model, train_loader, val_loader, num_epochs=200, scheduler_type=scheduler, prune_ratio=0.3, exp_name=f"{exp_name}_Training_core_model_Level-4", LR=1e-2)
+    fine_tuner(core_model, train_loader, val_loader, num_epochs=200, scheduler_type=scheduler, prune_ratio=0.3, exp_name=f"{exp_name}_Training_core_model_Level-4", LR=1e-2)
     acc_pruned, f1_pruned, params_pruned, mac_pruned, size_mb_pruned = evaluate(core_model, test_loader, profiling=True)
     torch.onnx.export(core_model, (torch.randn(1, 3, 32, 32).to(device),), f=f"./saves/onnx/Resnet20_Core_Model.onnx")
     accuracy_list.append(acc_pruned)
     profiling["params"].append(params_pruned)
     profiling["MAC's"].append(mac_pruned)
     profiling["model_size"].append(size_mb_pruned)
+    model_summary_with_frozen_counts(core_model, input_size=(3, 32, 32))
     
     
     if rebuild:
@@ -122,9 +123,12 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
             del core_model
 
             rebuilt_model = reconstruct_weights_from_dicts(rebuilt_model, pruned_indices=prune_meta_data[i]["zero_channels_info"], pruned_weights=prune_meta_data[i]["pruned_weights"], unpruned_indices=unprune_meta_data[i]["non_zero_channels_info"], unpruned_weights=unprune_meta_data[i]["unpruned_weights"])
-            rebuilt_model = freeze_channels(rebuilt_model, unprune_meta_data[i]["non_zero_channels_info"])
+            rebuilt_model = freeze_channels_2d(rebuilt_model, unprune_meta_data[i]["non_zero_channels_info"])
+            model_summary_with_frozen_counts(rebuilt_model, input_size=(3, 32, 32))
             
             fine_tuner(rebuilt_model, train_loader, val_loader, num_epochs=200, scheduler_type=scheduler, prune_ratio=0.3, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=1e-2)
+            check = validate_frozen_channels(rebuilt_model, unprune_meta_data[i]["non_zero_channels_info"])
+            print(f"Channel Freezing applied correctly: {check}")
             acc_rebuilt, f1_rebuilt, params_rebuilt, mac_rebuilt, size_mb_rebuilt = evaluate(rebuilt_model, test_loader, profiling=True)
             torch.onnx.export(rebuilt_model, (torch.randn(1, 3, 32, 32).to(device),), f=f"./saves/onnx/Resnet20_Descendant_Model_Level-{i+1}.onnx")
             core_model = rebuilt_model
@@ -145,5 +149,5 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
 
 if __name__ == '__main__':
     
-    iterative_filter_pruning(scheduler="step", exp_name="Exp_Iter_Adaptivity_VGG")
+    iterative_filter_pruning(exp_name="Exp_Iter_Adaptivity_Resnet18")
     print(f"{"-"*20}EXPERIMENT FINISHED{"-"*20}")

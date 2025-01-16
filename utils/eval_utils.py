@@ -15,7 +15,7 @@ from ptflops import get_model_complexity_info
 from calflops import calculate_flops
 from thop import profile
 from deepspeed.profiling.flops_profiler import get_model_profile
-from tqdm import tqdm
+from torchsummary import summary
 
 # Set device for training and evaluation
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -81,3 +81,31 @@ def profile_model(model, input_size):
 
     print(f"Params: {params / 1e6:.3f} M, MACs: {macs / 1e9:.3f} GMACs, FLOPs: {flops / 1e9:.3f} GFLOPs, Size: {size_mb:.2f} MB")
     return params, macs, size_mb
+
+
+def model_summary_with_frozen_counts(model, input_size, summary=False):
+    """
+    Generate a summary of the model, including counts of frozen and unfrozen parameters.
+    
+    Args:
+    - model: PyTorch model instance.
+    - input_size: Tuple specifying the input size (e.g., (3, 224, 224) for an image).
+    - device: Device for the model summary ("cuda" or "cpu").
+    """
+    # Use torchsummary for the general model summary
+    if summary:
+        print(summary(model, input_size))
+    
+    frozen_params_count = 0
+    unfrozen_params_count = 0
+
+    for param in model.parameters():
+        if param.requires_grad:
+            unfrozen_params_count += param.numel()
+        else:
+            frozen_params_count += param.numel()
+
+    print("\nParameter Statistics:")
+    print(f"  Total parameters: {frozen_params_count + unfrozen_params_count:,}")
+    print(f"  Trainable parameters (unfrozen): {unfrozen_params_count:,}")
+    print(f"  Non-trainable parameters (frozen): {frozen_params_count:,}")

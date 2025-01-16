@@ -1,4 +1,6 @@
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 import imgaug.augmenters as iaa
 import matplotlib.pyplot as plt
@@ -7,8 +9,11 @@ from torch.optim.lr_scheduler import StepLR, ExponentialLR, CyclicLR, CosineAnne
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 from utils.visualize_utils import plot_curves_with_val
+from tqdm import tqdm
 
-
+# Set device for training and evaluation
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Running on device:", device)
 
 # Define a custom ImgAugTransform
 class ImgAugTransform:
@@ -227,7 +232,7 @@ def fine_tuner_tqdm(model, train_loader, val_loader, num_epochs, scheduler_type,
         
         print(f"Epoch [{epoch+1}/{num_epochs}], "f"Train Loss: {epoch_loss:.4f}, Train Accuracy: {epoch_accuracy:.4f}, Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_accuracy:.2f}, Learning Rate: {current_lr:.6f}")
     
-    plot_curves_with_val(num_epochs, train_losses, train_accuracies, val_losses, val_accuracies, lrs, prune_ratio, exp_name)
+    # plot_curves_with_val(num_epochs, train_losses, train_accuracies, val_losses, val_accuracies, lrs, prune_ratio, exp_name)
     del optimizer
            
     print("Fine-Tuning Complete")
