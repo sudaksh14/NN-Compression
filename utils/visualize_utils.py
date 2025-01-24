@@ -105,7 +105,7 @@ def plot_curves_with_val(num_epochs, train_losses, train_accuracies, val_losses,
     plt.grid()
     
     plt.tight_layout()
-    plt.savefig(f"./plots/{exp_name}_Learning_Curve_Fine-Tuning_pruning_{str(int(prune_ratio*100))}")
+    plt.savefig(f"./plots/{exp_name}_Learning_Curve.png")
 
 
 # Plotting results
@@ -172,7 +172,7 @@ def plot_multilevel(accuracies, exp_name, labels=["Original", "Level-4", "Level-
     plt.tight_layout()
 
     # Save Plot
-    plt.savefig(f"./plots/{exp_name}_Resnet20_Rebuilt_performance.png")
+    plt.savefig(f"./plots/{exp_name}_Rebuilt_performance.png")
 
     
 
@@ -201,7 +201,7 @@ def plot_profiling(params, macs, sizes, exp_name, prune_ratio, labels = ["Origin
     fig.suptitle("Profiling Metrics", fontsize=16)
 
     # Save and show the plot
-    plt.savefig(f"./plots/{exp_name}_Profiling_Metrics_{str(int(prune_ratio*100))}")
+    plt.savefig(f"./plots/{exp_name}_Profiling_Metrics.png")
 
 
 def visualize_weights(weights, title="Pruned Weights in Conv1", save_path="./plots", name="conv1_pruned_weights.png"):
@@ -270,3 +270,32 @@ def visualize_4d_tensor(tensor, title="Pruned Weights in Conv1", save_path="./pl
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(f"{save_path}/{name}")
     print(f"Pruned weights visualization saved")
+
+
+def plot_KD_metrics(train_losses, train_hint_losses, train_distillation_losses, train_accuracies, val_losses, val_accuracies, epochs, exp_name):
+    epochs_range = range(1, epochs + 1)
+
+    plt.figure(figsize=(14, 10))
+
+    # Plot losses
+    plt.subplot(2, 1, 1)
+    plt.plot(epochs_range, train_losses, label="Train Loss")
+    plt.plot(epochs_range, train_hint_losses, label="Hint Loss")
+    plt.plot(epochs_range, train_distillation_losses, label="Distillation Loss")
+    plt.plot(epochs_range, val_losses, label="Validation Loss")
+    plt.xlabel("Epochs")
+    plt.ylabel("Loss")
+    plt.legend()
+    plt.title("Loss Metrics")
+
+    # Plot accuracies
+    plt.subplot(2, 1, 2)
+    plt.plot(epochs_range, train_accuracies, label="Train Accuracy")
+    plt.plot(epochs_range, val_accuracies, label="Validation Accuracy")
+    plt.xlabel("Epochs")
+    plt.ylabel("Accuracy")
+    plt.legend()
+    plt.title("Accuracy Metrics")
+
+    plt.tight_layout()
+    plt.savefig(f"./plots/{exp_name}_KD_curves.png")

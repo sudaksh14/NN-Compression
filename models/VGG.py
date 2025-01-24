@@ -25,7 +25,7 @@ class VGG(nn.Module):
         super(VGG, self).__init__()
         self.features = self._make_layers(conv_config, input_channels)
         self.classifier = nn.Sequential(
-            nn.Linear(512, 512),
+            nn.Linear(conv_config[list(conv_config.keys())[-1]][-1], 512),
             nn.ReLU(True),
             nn.Dropout(),
             nn.Linear(512, 512),
@@ -65,6 +65,29 @@ class VGG(nn.Module):
             elif isinstance(m, nn.Linear):
                 nn.init.normal_(m.weight, 0, 0.01)
                 nn.init.constant_(m.bias, 0)
+
+def VGG_General(channel_dict, variant="VGG16"):
+
+    conv_config = {}
+    current_block = 1
+    block_layers = []
+
+    # Sort keys numerically for proper order
+    sorted_keys = sorted(channel_dict.keys(), key=lambda x: int(x.split('.')[1]))
+
+    for key in sorted_keys:
+        out_channels, in_channels = channel_dict[key]
+        block_layers.append(out_channels)
+
+        # Determine block boundaries based on VGG pooling structure
+        if key.endswith(('3', '10', '20', '30', '40') ):  # End of a block
+            conv_config[current_block] = block_layers
+            current_block += 1
+            block_layers = []
+
+    return VGG(conv_config)
+
+           
 
 
 if __name__ == "__main__":

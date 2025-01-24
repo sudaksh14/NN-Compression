@@ -206,9 +206,9 @@ class SimpleCNN(nn.Module):
 def Index_Aware_pruner(model, amount, res_blocks=3, plot=True):
     
     count = 0
-    for name, module in model.named_modules():
+    for i, (name, module) in enumerate(model.named_modules()):
         if isinstance(module, nn.Conv2d):
-            if name == "conv1":
+            if name == "conv1" or name == "features.0":
                 print(name,  type(module))
                 pruned_indices_0 = get_pruned_channel_indices(module.weight, amount)
                 pruner = ChannelPruning(pruned_indices_0, dim=0)

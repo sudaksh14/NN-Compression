@@ -8,9 +8,11 @@
 #SBATCH --output=./outputs/slurm_output_%A.out
 #SBATCH --exclude=ivi-cn005,ivi-cn009,ivi-cn010,ivi-cn011,ivi-cn012,ivi-cn001
 
+conda activate new_env
 echo "hello world"
 echo | date
 echo "Structural Pruning Experiments"
+nvidia-smi
 
 # python3 eval.py
 # python3 adaptivity.py
