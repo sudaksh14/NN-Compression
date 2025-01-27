@@ -138,7 +138,7 @@ def prune_bias(layer, indices):
         layer.bias.data[~mask] = 0  # Apply the mask to the bias to prune it
         print(f"Pruned bias for channels {indices.tolist()}.")
 
-def get_pruned_channel_indices(tensor, amount, norm_type="L1"):
+def get_pruned_channel_indices(tensor, amount, norm_type="L1", prune_step=0):
     """
     Calculate channel indices to prune based on smallest norms across channels.
     """
@@ -147,10 +147,25 @@ def get_pruned_channel_indices(tensor, amount, norm_type="L1"):
 
     if norm_type == "L1":
         norms = torch.abs(tensor).view(num_channels, -1).sum(dim=1)
+        # norms = torch.sum(torch.abs(tensor), dim=(1, 2, 3))
     elif norm_type == "L2":
         norms = torch.sqrt((tensor ** 2).view(num_channels, -1).sum(dim=1))
     else:
         raise ValueError("norm_type must be 'L1' or 'L2'.")
+    
+    non_zero_channels = torch.sum(norms != 0).item()  # Number of channels with non-zero L1 norms
+    zero_channels = torch.sum(norms == 0).item()      # Number of channels with zero L1 norms
+    total_channels = norms.size(0)                   # Total number of channels (out_channels)
+
+    # Output the results
+    print(f"Number of channels with non-zero L1 norms: {non_zero_channels}")
+    print(f"Number of channels with zero L1 norms: {zero_channels}")
+    print(f"Total number of channels: {total_channels}")
+    print(total_channels == non_zero_channels + zero_channels)
+    
+    if prune_step > 0:
+        norms[norms == 0] = float('inf') # Set zero norms to infinity to avoid pruning them
+        num_prune = int((total_channels - zero_channels) * amount)  # Prune ratio normalized based on non-zero norms
 
     # Get indices with the smallest norms
     pruned_indices = torch.topk(norms, num_prune, largest=False).indices
@@ -203,14 +218,14 @@ class SimpleCNN(nn.Module):
         return x
 
 
-def Index_Aware_pruner(model, amount, res_blocks=3, plot=True):
+def Index_Aware_pruner(model, amount, prune_step=0, res_blocks=3, plot=True):
     
     count = 0
     for i, (name, module) in enumerate(model.named_modules()):
         if isinstance(module, nn.Conv2d):
             if name == "conv1" or name == "features.0":
                 print(name,  type(module))
-                pruned_indices_0 = get_pruned_channel_indices(module.weight, amount)
+                pruned_indices_0 = get_pruned_channel_indices(module.weight, amount, prune_step=prune_step)
                 pruner = ChannelPruning(pruned_indices_0, dim=0)
                 pruner.apply(module, name="weight", indices=pruned_indices_0, dim=0) # Prune along the output channel dimension
                 prune.remove(module, name="weight")
@@ -228,7 +243,7 @@ def Index_Aware_pruner(model, amount, res_blocks=3, plot=True):
                     
                 else:
   
-                    pruned_indices_0 = get_pruned_channel_indices(module.weight, amount)
+                    pruned_indices_0 = get_pruned_channel_indices(module.weight, amount, prune_step=prune_step)
                     pruner_dim_1 = ChannelPruning(indices_last_layer, dim=1)
                     pruner_dim_0 = ChannelPruning(pruned_indices_0, dim=0)
                     pruner_dim_1.apply(module, name="weight", indices=indices_last_layer, dim=1) # Prune along the input channel dimension
@@ -246,7 +261,8 @@ def Index_Aware_pruner(model, amount, res_blocks=3, plot=True):
             
             if plot:
                 visualize_4d_tensor(module.weight.data, title=f"Pruned weights in {name}", name=f"Resnet_{name}_pruned_weights")
-            
+    
+    return model        
         
         
 def get_nonzero_indices(model):

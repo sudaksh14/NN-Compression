@@ -71,13 +71,17 @@ print(f"Number of Train samples: {len(train_dataset)}")
 print(f"Number of Val samples: {len(val_dataset)}")
 print(f"Number of Test samples: {len(test_dataset)}")
 
-# original_model = torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_resnet20", pretrained=True).to(device)
 # torch.onnx.export(original_model, (torch.randn(1, 3, 32, 32).to(device),), f=f"./saves/onnx/VGG16_Original_Model.onnx")
 # print(dir(original_model))
 
 def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3, 0.3, 0.3], model_name="Resnet18", epochs=20, lr=1e-3, exp_name="ToyExp_Iter_Adaptivity_Resnet20", rebuild=True):
     
     assert prune_steps == len(prune_ratio), f"Expected Prune steps ({prune_steps}) to match the length of prune ratios ({len(prune_ratio)})."
+
+    if "Resnet" in model_name:
+        original_model = torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_resnet20", pretrained=True).to(device)
+    elif "VGG" in model_name:
+        original_model = torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_vgg16_bn", pretrained=True).to(device)
 
     accuracy_list = []
     profiling = {"params":[], "MAC's":[], "model_size":[], "latency":[]}
@@ -92,27 +96,40 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
                        
     prune_meta_data = []
     unprune_meta_data = []
-    
+
+    # Iterative Pruning
     for i in range(prune_steps):
-        if i == 0:
-            Index_Aware_pruner(original_model, amount=prune_ratio[i], plot=False)
-            zero_channels_info, num_pruned_channels, pruned_weights = get_pruned_indices_and_counts(original_model)
-            non_zero_channels_info, num_unpruned_channels, unpruned_weights = get_unpruned_indices_and_counts(original_model)
-        else:
-            Index_Aware_pruner(core_model, amount=prune_ratio[i], plot=False)
-            zero_channels_info, num_pruned_channels, pruned_weights = get_pruned_indices_and_counts(core_model)
-            non_zero_channels_info, num_unpruned_channels, unpruned_weights = get_unpruned_indices_and_counts(core_model)
+        original_model = Index_Aware_pruner(original_model, amount=prune_ratio[i], prune_step=i, plot=False)
+        zero_channels_info, num_pruned_channels, pruned_weights = get_pruned_indices_and_counts(original_model)
+        non_zero_channels_info, num_unpruned_channels, unpruned_weights = get_unpruned_indices_and_counts(original_model)
             
         prune_meta_data.append({"zero_channels_info" : zero_channels_info, "num_pruned_channels" : num_pruned_channels, "pruned_weights" : pruned_weights}) 
         unprune_meta_data.append({"non_zero_channels_info" : non_zero_channels_info, "num_unpruned_channels" : num_unpruned_channels, "unpruned_weights" : unpruned_weights})
-
-        if "Resnet" in model_name:
-            core_model = Resnet_General(unprune_meta_data[-1]["num_unpruned_channels"]).to(device)
-        elif "VGG" in model_name:
-            core_model = VGG_General(unprune_meta_data[-1]["num_unpruned_channels"]).to(device)
-        copy_weights_from_dict(core_model, unprune_meta_data[-1]["unpruned_weights"])
     
-    fine_tuner(core_model, train_loader, val_loader, num_epochs=epochs, optim_type="SGD", scheduler_type=scheduler, prune_ratio=0.3, exp_name=f"{exp_name}_Training_core_model_Level-4", LR=lr)
+    with open(f"./saves/pruning_metadata/{exp_name}_unprune_data.txt", "w") as file:
+        for index, dictionary in enumerate(unprune_meta_data):
+            file.write(f"Entry {index + 1}:\n")
+            for key, value in dictionary.items():
+                file.write(f"  {key}: {value}\n")
+            file.write("\n")  # Add a blank line between entries
+
+    with open(f"./saves/pruning_metadata/{exp_name}_prune_data.txt", "w") as file:
+        for index, dictionary in enumerate(prune_meta_data):
+            file.write(f"Entry {index + 1}:\n")
+            for key, value in dictionary.items():
+                file.write(f"  {key}: {value}\n")
+            file.write("\n")  # Add a blank line between entries
+
+    print("Pruning Metadata saved successfully.")
+
+    # Core Model Training
+    if "Resnet" in model_name:
+        core_model = Resnet_General(unprune_meta_data[-1]["num_unpruned_channels"]).to(device)
+    elif "VGG" in model_name:
+        core_model = VGG_General(unprune_meta_data[-1]["num_unpruned_channels"]).to(device)
+    copy_weights_from_dict(core_model, unprune_meta_data[-1]["unpruned_weights"])
+    
+    fine_tuner(core_model, train_loader, val_loader, num_epochs=epochs, optim_type="adam", scheduler_type=scheduler, prune_ratio=0.3, exp_name=f"{exp_name}_Training_core_model_Level-4", LR=lr)
     acc_pruned, f1_pruned, params_core, mac_core, size_mb_core, latency_core = evaluate(core_model, test_loader, profiling=True)
     # torch.onnx.export(core_model, (torch.randn(1, 3, 32, 32).to(device),), f=f"./saves/onnx/{model_name}_Core_Model.onnx")
     # save_statedict(core_model, unprune_meta_data[-1]["num_unpruned_channels"], path=f"./saves/state_dicts/{model_name}_Core_Model.pth")
@@ -137,7 +154,7 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
             rebuilt_model = freeze_channels_2d(rebuilt_model, unprune_meta_data[i]["non_zero_channels_info"])
             model_summary_with_frozen_counts(rebuilt_model, input_size=(3, 32, 32))
             
-            fine_tuner(rebuilt_model, train_loader, val_loader, num_epochs=epochs, optim_type="SGD", scheduler_type=scheduler, prune_ratio=0.3, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=lr)
+            fine_tuner(rebuilt_model, train_loader, val_loader, num_epochs=epochs, optim_type="adam", scheduler_type=scheduler, prune_ratio=0.3, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=lr)
             check = validate_frozen_channels(rebuilt_model, unprune_meta_data[i]["non_zero_channels_info"])
             print(f"Channel Freezing applied correctly: {check}")
             acc_rebuilt, f1_rebuilt, params_rebuilt, mac_rebuilt, size_mb_rebuilt, latency_rebuilt = evaluate(rebuilt_model, test_loader, profiling=True)
@@ -163,7 +180,10 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
   
 
 if __name__ == '__main__':
-
+    acc, prof = iterative_filter_pruning(epochs=20, lr=1e-3, exp_name="Exp_Global_Iter_Adaptivity_Resnet18")
+    exit()
+    """
+    # Experiment 1: Iterative Adaptivity with Resnet20
     schedulers = ['cosine', 'step', 'exponential', 'cyclic', 'Default']
     lrs = [1e-2, 1e-3, 1e-4, 1e-5]
     epochs = [20, 50, 100]
@@ -191,14 +211,14 @@ if __name__ == '__main__':
                         "MAC's": profiling["MAC's"],
                         "Model Size (MB)": profiling["model_size"],
                         "Latency": profiling["latency"]
-                        
-                    })
+                        })
+                
+                results_df = pd.DataFrame(results)
+                results_df.to_excel(f"./saves/Results/HPO_Resnet18_results.xlsx")
                 trial += 1
     
-    results_df = pd.DataFrame(results)
-    results_df.to_excel(f"./saves/Results/HPO_Resnet18_results.xlsx")
-
     print(f"{"-"*20}EXPERIMENT FINISHED{"-"*20}")
+    """
 
     
     # input = (1,3,32,32)
@@ -208,35 +228,35 @@ if __name__ == '__main__':
     # model.eval()
     # profile_model(model, input)
 
-    # path_core = "saves/state_dicts/VGG16_Core_Model.pth"
-    # path_level3 = "saves/state_dicts/VGG16_Descendant_Model_Level-3.pth"
+    path_core = "saves/state_dicts/VGG16_Core_Model.pth"
+    path_level3 = "saves/state_dicts/VGG16_Descendant_Model_Level-3.pth"
 
 
-    # loaded_data_core = torch.load(path_core, map_location=device)
-    # loaded_data_level3 = torch.load(path_level3, map_location=device)
+    loaded_data_core = torch.load(path_core, map_location=device)
+    loaded_data_level3 = torch.load(path_level3, map_location=device)
 
-    # state_dict_core = loaded_data_core["state_dict"]
-    # channel_dict_core = loaded_data_core["metadata"]
-    # model_core = VGG_General(channel_dict_core).to(device)
-    # model_core.load_state_dict(state_dict_core)
+    state_dict_core = loaded_data_core["state_dict"]
+    channel_dict_core = loaded_data_core["metadata"]
+    model_core = VGG_General(channel_dict_core).to(device)
+    model_core.load_state_dict(state_dict_core)
 
-    # state_dict_level3 = loaded_data_level3["state_dict"]
-    # channel_dict_level3 = loaded_data_level3["metadata"]
-    # model_level3 = VGG_General(channel_dict_level3).to(device)
-    # model_level3.load_state_dict(state_dict_level3)
+    state_dict_level3 = loaded_data_level3["state_dict"]
+    channel_dict_level3 = loaded_data_level3["metadata"]      
+    model_level3 = VGG_General(channel_dict_level3).to(device)
+    model_level3.load_state_dict(state_dict_level3)
 
-    # model_core.eval()
-    # model_level3.eval()
+    model_core.eval()
+    model_level3.eval()
 
-    # layer_name = "features.0"
-    # # channel_index = random.randint(1, 23)
-    # # print(channel_index)
+    layer_name = "features.0"
+    # channel_index = random.randint(1, 23)
+    # print(channel_index)
 
-    # layer_core = dict(model_core.named_modules()).get(layer_name)
-    # layer_level3 = dict(model_level3.named_modules()).get(layer_name)
-    
-    # for channel_index in range(23):
-    #     tensor1 = layer_core.weight.data[channel_index,2]
-    #     tensor2 = layer_level3.weight.data[channel_index,2]
+    layer_core = dict(model_core.named_modules()).get(layer_name)
+    layer_level3 = dict(model_level3.named_modules()).get(layer_name)
+  
+    for dim1 in range(3):
+        tensor1 = layer_core.weight.data[22,dim1]
+        tensor2 = layer_level3.weight.data[30,dim1]
 
-    #     print(torch.equal(tensor1, tensor2))
+        print(torch.equal(tensor1, tensor2))
