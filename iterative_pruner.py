@@ -20,6 +20,7 @@ from models.VGG import *
 import onnx
 import pandas as pd
 import random
+from copy import deepcopy
 
 
 
@@ -71,9 +72,6 @@ print(f"Number of Train samples: {len(train_dataset)}")
 print(f"Number of Val samples: {len(val_dataset)}")
 print(f"Number of Test samples: {len(test_dataset)}")
 
-# torch.onnx.export(original_model, (torch.randn(1, 3, 32, 32).to(device),), f=f"./saves/onnx/VGG16_Original_Model.onnx")
-# print(dir(original_model))
-
 def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3, 0.3, 0.3], model_name="Resnet18", epochs=20, lr=1e-3, exp_name="ToyExp_Iter_Adaptivity_Resnet20", rebuild=True):
     
     assert prune_steps == len(prune_ratio), f"Expected Prune steps ({prune_steps}) to match the length of prune ratios ({len(prune_ratio)})."
@@ -83,6 +81,9 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
     elif "VGG" in model_name:
         original_model = torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_vgg16_bn", pretrained=True).to(device)
 
+    # torch.onnx.export(original_model, (torch.randn(1, 3, 32, 32).to(device),), f=f"./saves/onnx/VGG16_Original_Model.onnx")
+    # print(dir(original_model))
+    
     accuracy_list = []
     profiling = {"params":[], "MAC's":[], "model_size":[], "latency":[]}
     
@@ -97,23 +98,42 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
     prune_meta_data = []
     unprune_meta_data = []
 
-    # Iterative Pruning
+    orig_copy = deepcopy(original_model)
+
+    # Iterative Pruning of Original Model
     for i in range(prune_steps):
-        original_model = Index_Aware_pruner(original_model, amount=prune_ratio[i], prune_step=i, plot=False)
-        zero_channels_info, num_pruned_channels, pruned_weights = get_pruned_indices_and_counts(original_model)
-        non_zero_channels_info, num_unpruned_channels, unpruned_weights = get_unpruned_indices_and_counts(original_model)
-            
+        # TODO: Implement Global Index Aware Pruning
+        # original_model, pruned_index = Index_Aware_pruner(original_model, amount=prune_ratio[i], prune_step=i, plot=False)
+        # zero_channels_info, num_pruned_channels, pruned_weights = get_pruned_channels_weights(orig_copy, pruned_index)
+        # non_zero_channels_info, num_unpruned_channels, unpruned_weights = get_unpruned_indices_and_counts(original_model)
+
+        if i == 0:
+            original_model, pruning_index = Index_Aware_pruner(original_model, amount=prune_ratio[i], plot=False)
+            zero_channels_info, num_pruned_channels, pruned_weights = get_pruned_channels_weights(orig_copy, pruning_index)
+            non_zero_channels_info, num_unpruned_channels, unpruned_weights = get_unpruned_indices_and_counts(original_model)
+        else:
+            core_model, pruning_index = Index_Aware_pruner(core_model, amount=prune_ratio[i], plot=False)
+            zero_channels_info, num_pruned_channels, pruned_weights = get_pruned_channels_weights(core_copy, pruning_index)
+            non_zero_channels_info, num_unpruned_channels, unpruned_weights = get_unpruned_indices_and_counts(core_model)
+
         prune_meta_data.append({"zero_channels_info" : zero_channels_info, "num_pruned_channels" : num_pruned_channels, "pruned_weights" : pruned_weights}) 
         unprune_meta_data.append({"non_zero_channels_info" : non_zero_channels_info, "num_unpruned_channels" : num_unpruned_channels, "unpruned_weights" : unpruned_weights})
-    
-    with open(f"./saves/pruning_metadata/{exp_name}_unprune_data.txt", "w") as file:
+
+        if "Resnet" in model_name:
+            core_model = Resnet_General(unprune_meta_data[-1]["num_unpruned_channels"]).to(device)
+        elif "VGG" in model_name:
+            core_model = VGG_General(unprune_meta_data[-1]["num_unpruned_channels"]).to(device)
+        copy_weights_from_dict(core_model, unprune_meta_data[-1]["unpruned_weights"])
+        core_copy = deepcopy(core_model)
+
+    with open(f"./saves/pruning_metadata/{exp_name}_unprune_data_new.txt", "w") as file:
         for index, dictionary in enumerate(unprune_meta_data):
             file.write(f"Entry {index + 1}:\n")
             for key, value in dictionary.items():
                 file.write(f"  {key}: {value}\n")
             file.write("\n")  # Add a blank line between entries
 
-    with open(f"./saves/pruning_metadata/{exp_name}_prune_data.txt", "w") as file:
+    with open(f"./saves/pruning_metadata/{exp_name}_prune_data_new.txt", "w") as file:
         for index, dictionary in enumerate(prune_meta_data):
             file.write(f"Entry {index + 1}:\n")
             for key, value in dictionary.items():
@@ -123,12 +143,6 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
     print("Pruning Metadata saved successfully.")
 
     # Core Model Training
-    if "Resnet" in model_name:
-        core_model = Resnet_General(unprune_meta_data[-1]["num_unpruned_channels"]).to(device)
-    elif "VGG" in model_name:
-        core_model = VGG_General(unprune_meta_data[-1]["num_unpruned_channels"]).to(device)
-    copy_weights_from_dict(core_model, unprune_meta_data[-1]["unpruned_weights"])
-    
     fine_tuner(core_model, train_loader, val_loader, num_epochs=epochs, optim_type="adam", scheduler_type=scheduler, prune_ratio=0.3, exp_name=f"{exp_name}_Training_core_model_Level-4", LR=lr)
     acc_pruned, f1_pruned, params_core, mac_core, size_mb_core, latency_core = evaluate(core_model, test_loader, profiling=True)
     # torch.onnx.export(core_model, (torch.randn(1, 3, 32, 32).to(device),), f=f"./saves/onnx/{model_name}_Core_Model.onnx")
@@ -141,7 +155,9 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
     model_summary_with_frozen_counts(core_model, input_size=(3, 32, 32)) 
 
     if rebuild:
+
         for i in range(prune_steps-1, -1, -1):
+            print(f"{"-"*20}Rebuilding Descendant Model Level-{i+1}{"-"*20}")
             new_channels = get_rebuild_channels(unprune_meta_data[i]["num_unpruned_channels"], prune_meta_data[i]["num_pruned_channels"])
             if "Resnet" in model_name:
                 rebuilt_model = Resnet_General(new_channels).to(device)
@@ -180,13 +196,15 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
   
 
 if __name__ == '__main__':
-    acc, prof = iterative_filter_pruning(epochs=20, lr=1e-3, exp_name="Exp_Global_Iter_Adaptivity_Resnet18")
-    exit()
-    """
+
+    # schedulers = ['cosine', 'step', 'exponential', 'cyclic', 'Default']
+    # lrs = [1e-2, 1e-3, 1e-4, 1e-5]
+    # epochs = [20, 50, 100]
+
     # Experiment 1: Iterative Adaptivity with Resnet20
-    schedulers = ['cosine', 'step', 'exponential', 'cyclic', 'Default']
-    lrs = [1e-2, 1e-3, 1e-4, 1e-5]
-    epochs = [20, 50, 100]
+    schedulers = ['cosine', 'step', 'cyclic', 'Default']
+    lrs = [1e-2, 1e-3, 1e-4]
+    epochs = [20, 50]
 
     results = []
     trial = 0
@@ -195,7 +213,7 @@ if __name__ == '__main__':
         for lr in lrs:
             for epoch in epochs:
                 original_model = torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_resnet20", pretrained=True).to(device)
-                test_acc, profiling = iterative_filter_pruning(model_name="Resnet18", epochs=epoch, lr=lr, scheduler=sch, exp_name=f"Exp_{trial+1}_Iter_Adaptivity_Resnet18_{sch.upper()}_{str(lr)}_{str(epoch)}")
+                test_acc, profiling = iterative_filter_pruning(model_name="Resnet18", epochs=epoch, lr=lr, scheduler=sch, exp_name=f"Exp_{trial+1}_HPO_Iter_Adaptivity_Resnet18_{sch.upper()}_{str(lr)}_{str(epoch)}")
                 
                 results.append({
                         "Trial": trial + 1,
@@ -218,8 +236,7 @@ if __name__ == '__main__':
                 trial += 1
     
     print(f"{"-"*20}EXPERIMENT FINISHED{"-"*20}")
-    """
-
+    exit()
     
     # input = (1,3,32,32)
     # path = "saves/onnx/Resnet20_Core_Model.onnx"

@@ -220,6 +220,7 @@ class SimpleCNN(nn.Module):
 
 def Index_Aware_pruner(model, amount, prune_step=0, res_blocks=3, plot=True):
     
+    pruning_index = {}
     count = 0
     for i, (name, module) in enumerate(model.named_modules()):
         if isinstance(module, nn.Conv2d):
@@ -229,6 +230,7 @@ def Index_Aware_pruner(model, amount, prune_step=0, res_blocks=3, plot=True):
                 pruner = ChannelPruning(pruned_indices_0, dim=0)
                 pruner.apply(module, name="weight", indices=pruned_indices_0, dim=0) # Prune along the output channel dimension
                 prune.remove(module, name="weight")
+                pruning_index[name] = {"pruned_dim0": pruned_indices_0.tolist(), "pruned_dim1": []}
  
             else:
                 
@@ -240,6 +242,7 @@ def Index_Aware_pruner(model, amount, prune_step=0, res_blocks=3, plot=True):
                     pruner_down_1.apply(module, name="weight", indices=indices_down_1, dim=1) # Prune along the input channel dimension 
                     pruner_down_0.apply(module, name="weight", indices=indices_last_layer, dim=0) # Prune along the output channel dimension
                     prune.remove(module, name="weight")
+                    pruning_index[name] = {"pruned_dim0": indices_last_layer.tolist(), "pruned_dim1": indices_down_1.tolist()}
                     
                 else:
   
@@ -249,6 +252,7 @@ def Index_Aware_pruner(model, amount, prune_step=0, res_blocks=3, plot=True):
                     pruner_dim_1.apply(module, name="weight", indices=indices_last_layer, dim=1) # Prune along the input channel dimension
                     pruner_dim_0.apply(module, name="weight", indices=pruned_indices_0, dim=0) # Prune along the output channel dimension
                     prune.remove(module, name="weight")
+                    pruning_index[name] = {"pruned_dim0": pruned_indices_0.tolist(), "pruned_dim1": indices_last_layer.tolist()}
 
                     count += 1
                 
@@ -262,7 +266,7 @@ def Index_Aware_pruner(model, amount, prune_step=0, res_blocks=3, plot=True):
             if plot:
                 visualize_4d_tensor(module.weight.data, title=f"Pruned weights in {name}", name=f"Resnet_{name}_pruned_weights")
     
-    return model        
+    return model, pruning_index        
         
         
 def get_nonzero_indices(model):
@@ -327,8 +331,6 @@ def rebuilt_bigger(channel_dict_path, state_dict_path, device):
     return model
 
 
-
-
 def get_pruned_indices_and_counts(model):
     """
     Analyze a structurally pruned model to determine:
@@ -369,7 +371,127 @@ def get_pruned_indices_and_counts(model):
             pruned_info[name] = layer_info
             num_pruned_channels[name] = (len(pruned_dim0), len(pruned_dim1))
             
-            pruned_weights[name] = weights[pruned_dim0][:,pruned_dim1,:,:]
+            # Save pruned weights
+            if pruned_dim0 and pruned_dim1:
+                pruned_weights[name] = weights[pruned_dim0, :, :, :][:, pruned_dim1, :, :]
+            else:
+                pruned_weights[name] = weights[pruned_dim0, :, :, :]
+    
+    return pruned_info, num_pruned_channels, pruned_weights
+
+
+def get_pruned_indices_and_counts_with_ignore(pruned_model, original_model, ignore_dim0=None, ignore_dim1=None):
+    """
+    Analyze a structurally pruned model to determine:
+    - The indices of newly pruned channels (dim 0 and dim 1), ignoring previously handled indices.
+    - The number of newly pruned channels in each layer.
+    - A single tensor of the original weights for newly pruned indices.
+
+    Parameters:
+    - pruned_model: The structurally pruned PyTorch model.
+    - original_model: The original (unpruned) PyTorch model.
+    - ignore_dim0: Dictionary with layer names and dim0 indices to ignore.
+    - ignore_dim1: Dictionary with layer names and dim1 indices to ignore.
+
+    Returns:
+    - pruned_info: A dictionary containing newly pruned indices for each layer.
+    - num_pruned_channels: A dictionary with the number of newly pruned channels for each layer.
+    - pruned_weights: A dictionary with a single tensor containing the original weights of newly pruned indices.
+    """
+    pruned_info = {}
+    num_pruned_channels = {}
+    pruned_weights = {}
+
+    for (pruned_name, pruned_layer), (orig_name, orig_layer) in zip(
+        pruned_model.named_modules(), original_model.named_modules()
+    ):
+        if isinstance(pruned_layer, nn.Conv2d):  # Only process Conv2d layers
+            layer_info = {}
+
+            # Get the weight tensors from both models
+            pruned_weights_tensor = pruned_layer.weight.detach()
+            original_weights_tensor = orig_layer.weight.detach()
+
+            # Identify pruned filters along dim=0 (output channels)
+            all_pruned_dim0 = torch.nonzero(pruned_weights_tensor.abs().sum(dim=(1, 2, 3)) == 0).squeeze().tolist()
+            if isinstance(all_pruned_dim0, int):  # Handle single index case
+                all_pruned_dim0 = [all_pruned_dim0]
+            
+            # Ignore previously handled indices for dim0
+            ignored_dim0 = set(ignore_dim0[pruned_name]) if ignore_dim0 else set()
+            new_pruned_dim0 = [idx for idx in all_pruned_dim0 if idx not in ignored_dim0]
+            layer_info['pruned_dim0'] = new_pruned_dim0
+
+            # Identify pruned filters along dim=1 (input channels)
+            all_pruned_dim1 = torch.nonzero(pruned_weights_tensor.abs().sum(dim=(0, 2, 3)) == 0).squeeze().tolist()
+            if isinstance(all_pruned_dim1, int):  # Handle single index case
+                all_pruned_dim1 = [all_pruned_dim1]
+            
+            # Ignore previously handled indices for dim1
+            ignored_dim1 = set(ignore_dim1[pruned_name]) if ignore_dim1 else set()
+            new_pruned_dim1 = [idx for idx in all_pruned_dim1 if idx not in ignored_dim1]
+            layer_info['pruned_dim1'] = new_pruned_dim1
+
+            # Store the number of newly pruned channels
+            num_pruned_channels[pruned_name] = (len(new_pruned_dim0), len(new_pruned_dim1))
+
+            # Save layer info
+            pruned_info[pruned_name] = layer_info
+ 
+            # Save pruned weights
+            if new_pruned_dim0 and new_pruned_dim1:
+                pruned_weights[pruned_name] = original_weights_tensor[new_pruned_dim0, :, :, :][:, new_pruned_dim1, :, :]
+            else:
+                pruned_weights[pruned_name] = original_weights_tensor[new_pruned_dim0, :, :, :]
+
+    return pruned_info, num_pruned_channels, pruned_weights
+
+
+def get_pruned_channels_weights(model, pruned_index):
+    """
+    Analyze a structurally pruned model to determine:
+    - The indices of pruned channels (dim 0 and dim 1).
+    - The number of pruned channels in each layer.
+    
+    Parameters:
+    - model: The Original PyTorch model.
+
+    Returns:
+    - pruned_info: A dictionary containing pruned indices, counts and weights for each layer.
+    """
+    pruned_info = {}
+    pruned_weights = {}
+    num_pruned_channels = {}
+    
+    for name, layer in model.named_modules():
+        if isinstance(layer, nn.Conv2d):  # Check for Conv2d layers
+            layer_info = {}
+            
+            # Get the weight tensor
+            weights = layer.weight.detach()
+            
+            # Identify pruned filters along dim=0 (output channels)
+            pruned_dim0 = pruned_index[name]["pruned_dim0"]
+            if isinstance(pruned_dim0, int):  # Handle single index case
+                pruned_dim0 = [pruned_dim0]
+            layer_info['pruned_dim0'] = sorted(pruned_dim0)
+            
+            
+            # Identify pruned filters along dim=1 (input channels)
+            pruned_dim1 = pruned_index[name]["pruned_dim1"]
+            if isinstance(pruned_dim1, int):  # Handle single index case
+                pruned_dim1 = [pruned_dim1]
+            layer_info['pruned_dim1'] = sorted(pruned_dim1)
+            
+            # Add layer information to pruned_info
+            pruned_info[name] = layer_info
+            num_pruned_channels[name] = (len(pruned_dim0), len(pruned_dim1))
+
+            # Save pruned weights
+            if pruned_dim0 and pruned_dim1:
+                pruned_weights[name] = weights[pruned_dim0, :, :, :][:, pruned_dim1, :, :]
+            else:
+                pruned_weights[name] = weights[pruned_dim0, :, :, :]
     
     return pruned_info, num_pruned_channels, pruned_weights
             
@@ -466,8 +588,18 @@ def reconstruct_weights_from_dicts(model, pruned_indices, pruned_weights, unprun
             pruned_dim0, pruned_dim1 = pruned_indices[name].values()
             unpruned_dim0, unpruned_dim1 = unpruned_indices[name].values()
 
+            # print(f"Reconstructing weights for {name} with pruned indices {pruned_dim0}, {pruned_dim1}.")
+            # print(f"Reconstructing weights for {name} with unpruned indices {unpruned_dim0}, {unpruned_dim1}.")
+            # print(f"Pruned weights shape: {pruned_weights[name].shape}")
+            # print(f"Unpruned weights shape: {unpruned_weights[name].shape}")
+            # print(f"Layer weights shape: {layer.weight.shape}")
+
             # Assign pruned weights
-            layer.weight.data[pruned_dim0][:,pruned_dim1,:,:] = pruned_weights[name].to(new_device)
+            if pruned_dim0 and pruned_dim1:
+                layer.weight.data[pruned_dim0][:,pruned_dim1,:,:] = pruned_weights[name].to(new_device)
+            else:
+                layer.weight.data[pruned_dim0,:,:,:] = pruned_weights[name].to(new_device)
+            
 
             # Assign unpruned weights
             layer.weight.data[unpruned_dim0][:,unpruned_dim1,:,:] = unpruned_weights[name].to(new_device)
