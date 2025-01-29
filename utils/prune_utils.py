@@ -475,6 +475,7 @@ def get_pruned_channels_weights(model, pruned_index):
             if isinstance(pruned_dim0, int):  # Handle single index case
                 pruned_dim0 = [pruned_dim0]
             layer_info['pruned_dim0'] = sorted(pruned_dim0)
+            # layer_info['pruned_dim0'] = pruned_dim0
             
             
             # Identify pruned filters along dim=1 (input channels)
@@ -482,6 +483,7 @@ def get_pruned_channels_weights(model, pruned_index):
             if isinstance(pruned_dim1, int):  # Handle single index case
                 pruned_dim1 = [pruned_dim1]
             layer_info['pruned_dim1'] = sorted(pruned_dim1)
+            # layer_info['pruned_dim1'] = pruned_dim1
             
             # Add layer information to pruned_info
             pruned_info[name] = layer_info
@@ -563,6 +565,121 @@ def get_core_weights(pruned_model, unpruned_weights):
             unpruned_weights[name] = module.weight.data
 
 
+def reconstruct_Global_weights_from_dicts(model, pruned_indices, pruned_weights, unpruned_indices, unpruned_weights):
+    
+    model.eval()
+    """
+    Reconstruct weights for a model using pruned and unpruned indices and tensors.
+
+    Parameters:
+    - pruned_indices: dict, mapping layer names to (dim0_indices, dim1_indices) of pruned weights.
+    - pruned_weights: dict, mapping layer names to tensors of pruned weights.
+    - unpruned_indices: dict, mapping layer names to (dim0_indices, dim1_indices) of unpruned weights.
+    - unpruned_weights: dict, mapping layer names to tensors of unpruned weights.
+    - model: torch.nn.Module, the model to reconstruct weights for.
+
+    Returns:
+    - reconstructed_model: torch.nn.Module, the model with reconstructed weights.
+    """
+    # Iterate through the model's state_dict to dynamically fetch layer shapes
+    for name, layer in model.named_modules():
+        if isinstance(layer, nn.Conv2d):
+            new_device = layer.weight.device
+
+            # Retrieve pruned and unpruned indices
+            pruned_dim0, pruned_dim1 = pruned_indices[name].values()
+            unpruned_dim0, unpruned_dim1 = unpruned_indices[name].values()
+
+            # weight = layer.weight.clone()
+
+            # print(weight[0,0])
+            # # weight[[0,1]][:,[0,1],:,:] = pruned_weights[name].to(new_device)
+            # weight[0,0] = pruned_weights[name][0,0].to(new_device)
+            # print(weight[0,0])
+            # print(weight[0,0,:,:])
+            # exit()
+
+            # print(layer.weight[0,0])
+
+            # check_overlap(layer.weight, pruned_weights[name])
+            # check_overlap(layer.weight, weight)
+
+            # print(f"Reconstructing weights for {name} with pruned indices {pruned_dim0}, {pruned_dim1}.")
+            # print(f"Reconstructing weights for {name} with unpruned indices {unpruned_dim0}, {unpruned_dim1}.")
+            # print(f"Pruned weights shape: {pruned_weights[name].shape}")
+            # print(f"Unpruned weights shape: {unpruned_weights[name].shape}")
+            # print(f"Layer weights shape: {layer.weight.shape}")
+
+            # print(pruned_weights[name][0,0])
+
+            # Combine and sort
+            combined_dim0 = sorted(pruned_dim0 + unpruned_dim0)
+            combined_dim1 = sorted(pruned_dim1 + unpruned_dim1)
+
+            # Find new indices for list1 and list2
+            new_pruned_dim0 = [combined_dim0.index(x) for x in pruned_dim0]
+            new_unpruned_dim0 = [combined_dim0.index(x) for x in unpruned_dim0]
+
+            new_pruned_dim1 = [combined_dim1.index(x) for x in pruned_dim1]
+            new_unpruned_dim1 = [combined_dim1.index(x) for x in unpruned_dim1]
+
+            # print(weight[0, 0])
+
+            # Assign pruned weights
+            if pruned_dim0 and pruned_dim1:
+                # layer.weight[new_pruned_dim0][:, new_pruned_dim1, :, :].copy_(pruned_weights[name].to(new_device))
+                # layer.weight[new_pruned_dim0][:, new_pruned_dim1, :, :] = pruned_weights[name].to(new_device)
+                for i in range(len(new_pruned_dim0)):
+                    out_idx = new_pruned_dim0[i]  # Output channel index
+                    for j in range(len(new_pruned_dim1)):
+                        in_idx = new_pruned_dim1[j]   # Input channel index
+                        layer.weight.data[out_idx, in_idx, :, :] = pruned_weights[name][i, j].to(new_device)
+                # weight[new_pruned_dim0][:, new_pruned_dim1, :, :] = pruned_weights[name].to(new_device)
+                # layer.weight.index_put_((torch.tensor(new_pruned_dim0), torch.tensor(new_pruned_dim1)), pruned_weights[name].to(layer.weight.device))
+            else:
+                for i in range(len(new_pruned_dim0)):
+                    out_idx = new_pruned_dim0[i]  # Output channel index
+                    layer.weight.data[out_idx, :, :, :] = pruned_weights[name][i].to(new_device)
+                # weight[new_pruned_dim0,:,:,:] = pruned_weights[name].to(new_device)
+
+            
+            # Assign unpruned weights
+            # layer.weight.index_put_((torch.tensor(new_unpruned_dim0), torch.tensor(new_unpruned_dim1)), unpruned_weights[name].to(layer.weight.device))
+            # layer.weight[new_unpruned_dim0][:,new_unpruned_dim1,:,:] = unpruned_weights[name].to(new_device)
+            for i in range(len(new_unpruned_dim0)):
+                    out_idx = new_unpruned_dim0[i]  # Output channel index
+                    for j in range(len(new_unpruned_dim1)):
+                        in_idx = new_unpruned_dim1[j]   # Input channel index
+                        layer.weight.data[out_idx, in_idx, :, :] = unpruned_weights[name][i, j].to(new_device)
+            # weight[new_unpruned_dim0][:,new_unpruned_dim1,:,:] = unpruned_weights[name].to(new_device)
+            # layer.weight[new_unpruned_dim0][:,new_unpruned_dim1,:,:].requires_grad = False
+            # layer.weight[new_unpruned_dim0][:,new_unpruned_dim1,:,:].copy_(unpruned_weights[name].to(new_device))
+
+            
+            # Channel Freezing
+            for i in range(len(new_unpruned_dim0)):
+                    out_idx = new_unpruned_dim0[i]  # Output channel index
+                    for j in range(len(new_unpruned_dim1)):
+                        in_idx = new_unpruned_dim1[j]   # Input channel index
+                        layer.weight.data[out_idx, in_idx, :, :].requires_grad = False
+
+
+            # weight = weight.to(new_device)
+            # print(weight[0,0])
+
+            # layer.weight = nn.Parameter(weight)
+            # layer.weight.data = weight
+
+            # with torch.no_grad():
+            #     # layer.weight.copy_(weight)
+            #     layer.weight.copy_(torch.zeros_like(weight, device=new_device))
+            
+            # print(layer.weight[4,4])
+
+            # check_overlap(layer.weight, pruned_weights[name])
+            # check_overlap(layer.weight, weight)
+
+    return model
 
 def reconstruct_weights_from_dicts(model, pruned_indices, pruned_weights, unpruned_indices, unpruned_weights):
     """
@@ -587,12 +704,6 @@ def reconstruct_weights_from_dicts(model, pruned_indices, pruned_weights, unprun
             # Retrieve pruned and unpruned indices
             pruned_dim0, pruned_dim1 = pruned_indices[name].values()
             unpruned_dim0, unpruned_dim1 = unpruned_indices[name].values()
-
-            # print(f"Reconstructing weights for {name} with pruned indices {pruned_dim0}, {pruned_dim1}.")
-            # print(f"Reconstructing weights for {name} with unpruned indices {unpruned_dim0}, {unpruned_dim1}.")
-            # print(f"Pruned weights shape: {pruned_weights[name].shape}")
-            # print(f"Unpruned weights shape: {unpruned_weights[name].shape}")
-            # print(f"Layer weights shape: {layer.weight.shape}")
 
             # Assign pruned weights
             if pruned_dim0 and pruned_dim1:
@@ -712,6 +823,27 @@ def validate_frozen_channels(model, channel_indices):
                 all_frozen = all_frozen and dim0_bias_frozen
 
     return all_frozen
+
+
+def check_overlap(big_tensor, small_tensor):
+    """
+    Check if there's any overlap between two tensors.
+
+    Args:
+        big_tensor: The larger tensor.
+        small_tensor: The smaller tensor.
+
+    Returns:
+        A boolean indicating whether there's overlap.
+    """
+
+    print(f"Small Tensor Shape: {small_tensor.shape}")
+    print(f"Big Tensor Shape: {big_tensor.shape}")
+
+    overlap = torch.isin(small_tensor, big_tensor)
+
+    print(f"Overlap found: {overlap.any().item()}")  # True if there's at least one overlap
+    print(f"Matching values: {small_tensor[overlap].shape}")  # Prints matching values
 
 
     
