@@ -707,13 +707,30 @@ def reconstruct_weights_from_dicts(model, pruned_indices, pruned_weights, unprun
 
             # Assign pruned weights
             if pruned_dim0 and pruned_dim1:
-                layer.weight.data[pruned_dim0][:,pruned_dim1,:,:] = pruned_weights[name].to(new_device)
+                for i in range(len(pruned_dim0)):
+                    out_idx = pruned_dim0[i]  # Output channel index
+                    for j in range(len(pruned_dim1)):
+                        in_idx = pruned_dim1[j]   # Input channel index
+                        layer.weight.data[out_idx, in_idx, :, :] = pruned_weights[name][i, j].to(new_device)
             else:
-                layer.weight.data[pruned_dim0,:,:,:] = pruned_weights[name].to(new_device)
+                for i in range(len(pruned_dim0)):
+                    out_idx = pruned_dim0[i]  # Output channel index
+                    layer.weight.data[out_idx, :, :, :] = pruned_weights[name][i].to(new_device)
             
 
             # Assign unpruned weights
-            layer.weight.data[unpruned_dim0][:,unpruned_dim1,:,:] = unpruned_weights[name].to(new_device)
+            for i in range(len(unpruned_dim0)):
+                    out_idx = unpruned_dim0[i]  # Output channel index
+                    for j in range(len(unpruned_dim1)):
+                        in_idx = unpruned_dim1[j]   # Input channel index
+                        layer.weight.data[out_idx, in_idx, :, :] = unpruned_weights[name][i, j].to(new_device)
+
+            # Channel Freezing
+            for i in range(len(unpruned_dim0)):
+                    out_idx = unpruned_dim0[i]  # Output channel index
+                    for j in range(len(unpruned_dim1)):
+                        in_idx = unpruned_dim1[j]   # Input channel index
+                        layer.weight.data[out_idx, in_idx, :, :].requires_grad = False
             
     return model
                        

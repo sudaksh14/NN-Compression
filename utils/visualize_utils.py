@@ -176,7 +176,7 @@ def plot_multilevel(accuracies, exp_name, labels=["Original", "Level-4", "Level-
 
     
 
-def plot_profiling(params, macs, sizes, exp_name, prune_ratio, labels = ["Original", "Pruned", "Rebuilt"]):
+def plot_profiling(params, macs, sizes, exp_name, labels = ["Original", "Pruned", "Rebuilt"]):
 
     # Create subplots
     fig, axes = plt.subplots(3, 1, figsize=(10, 12), sharex=True)

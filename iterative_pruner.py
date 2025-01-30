@@ -149,10 +149,10 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
     print("Pruning Metadata saved successfully.")
 
     # Core Model Training
-    fine_tuner(core_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, prune_ratio=0.3, exp_name=f"{exp_name}_Training_core_model_Level-4", LR=lr)
+    # fine_tuner(core_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, prune_ratio=0.3, exp_name=f"{exp_name}_Training_core_model_Level-4", LR=lr)
     acc_pruned, f1_pruned, params_core, mac_core, size_mb_core, latency_core = evaluate(core_model, test_loader, profiling=True)
     # torch.onnx.export(core_model, (torch.randn(1, 3, 32, 32).to(device),), f=f"./saves/onnx/{model_name}_Core_Model.onnx")
-    # save_statedict(core_model, unprune_meta_data[-1]["num_unpruned_channels"], path=f"./saves/state_dicts/{model_name}_Core_Model.pth")
+    # save_statedict(core_model, unprune_meta_data[-1]["num_unpruned_channels"], path=f"./saves/state_dicts/{exp_name}_{model_name}_Core_Model.pth")
     accuracy_list.append(acc_pruned)
     profiling["params"].append(params_core)
     profiling["MAC's"].append(mac_core)
@@ -173,15 +173,15 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
             del core_model
 
             rebuilt_model = reconstruct_weights_from_dicts(rebuilt_model, pruned_indices=prune_meta_data[i]["zero_channels_info"], pruned_weights=prune_meta_data[i]["pruned_weights"], unpruned_indices=unprune_meta_data[i]["non_zero_channels_info"], unpruned_weights=unprune_meta_data[i]["unpruned_weights"])
-            rebuilt_model = freeze_channels_2d(rebuilt_model, unprune_meta_data[i]["non_zero_channels_info"])
+            # rebuilt_model = freeze_channels_2d(rebuilt_model, unprune_meta_data[i]["non_zero_channels_info"])
             model_summary_with_frozen_counts(rebuilt_model, input_size=(3, 32, 32))
             
-            fine_tuner(rebuilt_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, prune_ratio=0.3, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=lr)
-            check = validate_frozen_channels(rebuilt_model, unprune_meta_data[i]["non_zero_channels_info"])
-            print(f"Channel Freezing applied correctly: {check}")
+            # fine_tuner(rebuilt_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, prune_ratio=0.3, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=lr)
+            # check = validate_frozen_channels(rebuilt_model, unprune_meta_data[i]["non_zero_channels_info"])
+            # print(f"Channel Freezing applied correctly: {check}")
             acc_rebuilt, f1_rebuilt, params_rebuilt, mac_rebuilt, size_mb_rebuilt, latency_rebuilt = evaluate(rebuilt_model, test_loader, profiling=True)
             # torch.onnx.export(rebuilt_model, (torch.randn(1, 3, 32, 32).to(device),), f=f"./saves/onnx/{model_name}_Descendant_Model_Level-{i+1}.onnx")
-            # save_statedict(rebuilt_model, new_channels, path=f"./saves/state_dicts/{model_name}_Descendant_Model_Level-{i+1}.pth")
+            # save_statedict(rebuilt_model, new_channels, path=f"./saves/state_dicts/{exp_name}_{model_name}_Descendant_Model_Level-{i+1}.pth")
             core_model = rebuilt_model
 
             accuracy_list.append(acc_rebuilt)
@@ -191,10 +191,10 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
             profiling["latency"].append(latency_rebuilt)
             
 
-        # plot_multilevel(accuracy_list, exp_name)
-        # plot_profiling(profiling["params"], profiling["MAC's"], profiling["model_size"], exp_name, prune_ratio=0.3, labels=["Original", "Level-4", "Level-3", "Level-2", "Level-1"])
-        plot_multilevel(accuracy_list, exp_name, labels=["Original", "Core Model", "Rebuilt"])
-        plot_profiling(profiling["params"], profiling["MAC's"], profiling["model_size"], exp_name, prune_ratio=0.5)
+        plot_multilevel(accuracy_list, exp_name)
+        plot_profiling(profiling["params"], profiling["MAC's"], profiling["model_size"], exp_name, labels=["Original", "Level-4", "Level-3", "Level-2", "Level-1"])
+        # plot_multilevel(accuracy_list, exp_name, labels=["Original", "Core Model", "Rebuilt"])
+        # plot_profiling(profiling["params"], profiling["MAC's"], profiling["model_size"], exp_name)
 
 
         return accuracy_list, profiling
@@ -315,8 +315,8 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
 
 if __name__ == '__main__':
 
-    # test_acc, profiling = Global_iterative_filter_pruning(model_name="Resnet18", epochs=1, lr=1e-3, optim="adam", exp_name="Exp_Global_Iter_Adaptivity_Resnet18")
-    # exit()
+    test_acc, profiling = iterative_filter_pruning(model_name="Resnet18", epochs=1, lr=1e-3, optim="adam", exp_name="Exp_00_Iter_Adaptivity_Resnet18")
+    exit()
 
     # schedulers = ['cosine', 'step', 'exponential', 'cyclic', 'Default']
     # lrs = [1e-2, 1e-3, 1e-4, 1e-5]
@@ -326,7 +326,7 @@ if __name__ == '__main__':
     schedulers = ['cosine', 'step', 'cyclic', 'Default']
     lrs = [1e-3]
     epochs = [20, 50]
-    model_name = ["Resnet18"]
+    model_name = ["VGG16"]
 
     results = []
     trial = 0
@@ -336,7 +336,7 @@ if __name__ == '__main__':
             for epoch in epochs:
                 for model in model_name:
                     # test_acc, profiling = iterative_filter_pruning(scheduler=sch, prune_steps=1, prune_ratio=[0.5], model_name=model, epochs=epoch, lr=lr, optim="SGD", exp_name=f"Exp_{trial+1}_DA(Big)_single_Adaptivity_{model.upper()}_{sch.upper()}_{str(lr)}_{str(epoch)}")
-                    test_acc, profiling = Global_iterative_filter_pruning(scheduler=sch, model_name=model, epochs=epoch, lr=lr, optim="adam", exp_name=f"Exp_{trial+1}_Global_Adaptivity_{model.upper()}_{sch.upper()}_{str(lr)}_{str(epoch)}")
+                    test_acc, profiling = Global_iterative_filter_pruning(scheduler=sch, model_name=model, epochs=epoch, lr=lr, optim="SGD", exp_name=f"Exp_{trial+1}_Global_Adaptivity_{model.upper()}_{sch.upper()}_{str(lr)}_{str(epoch)}")
                     
                     results.append({
                             "Trial": trial + 1,
