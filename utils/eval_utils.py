@@ -22,20 +22,30 @@ from torchsummary import summary
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Running on device:", device)
 
-def evaluate(model, data_loader, plot_title="Test Accuracy & F1-Score", device=device, plot=False, profiling=False):
+def evaluate(model, data_loader, plot_title="Test Accuracy & F1-Score", device=device, plot=False, profiling=False, KD=False):
     model = model.to(device)
     model.eval()
     
     all_preds = []
     all_labels = []
-    
-    with torch.no_grad():
-        for inputs, labels in data_loader:
-            inputs, labels = inputs.to(device), labels.to(device)
-            outputs = model(inputs)
-            _, preds = torch.max(outputs, 1)
-            all_preds.extend(preds.cpu().numpy())
-            all_labels.extend(labels.cpu().numpy())
+
+    if KD:
+        with torch.no_grad():
+            for inputs, labels in data_loader:
+                inputs, labels = inputs.to(device), labels.to(device)
+                outputs, _ = model(inputs)
+                _, preds = torch.max(outputs, 1)
+                all_preds.extend(preds.cpu().numpy())
+                all_labels.extend(labels.cpu().numpy())
+
+    else:
+        with torch.no_grad():
+            for inputs, labels in data_loader:
+                inputs, labels = inputs.to(device), labels.to(device)
+                outputs = model(inputs)
+                _, preds = torch.max(outputs, 1)
+                all_preds.extend(preds.cpu().numpy())
+                all_labels.extend(labels.cpu().numpy())
     
     # Calculate metrics
     accuracy = accuracy_score(all_labels, all_preds)
@@ -56,8 +66,6 @@ def evaluate(model, data_loader, plot_title="Test Accuracy & F1-Score", device=d
         return accuracy, f1, params, mac, size_mb, latency
         
     return accuracy, f1
-
-
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters())

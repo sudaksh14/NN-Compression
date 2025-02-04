@@ -556,7 +556,9 @@ def get_rebuild_channels(unpruned_channels, pruned_channels):
         new_channels_dict[name] = (new_in_channels, new_out_channels)
         
     return new_channels_dict
-        
+
+def get_batchnorm():
+    pass
 
 
 def get_core_weights(pruned_model, unpruned_weights):
@@ -566,8 +568,6 @@ def get_core_weights(pruned_model, unpruned_weights):
 
 
 def reconstruct_Global_weights_from_dicts(model, pruned_indices, pruned_weights, unpruned_indices, unpruned_weights):
-    
-    model.eval()
     """
     Reconstruct weights for a model using pruned and unpruned indices and tensors.
 

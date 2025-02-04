@@ -142,7 +142,7 @@ def plot_comparison_3stage(accuracy_list, exp_name, prune_ratio):
     plt.savefig(f"./plots/{exp_name}_Resnet20_Accuracy_Comparison_{str(int(prune_ratio*100))}.png")
 
 
-def plot_multilevel(accuracies, exp_name, labels=["Original", "Level-4", "Level-3", "Level-2", "Level-1"]):
+def plot_multilevel(accuracies, exp_name, labels = ["Original", "Core Model", "Rebuilt"]):
     if len(accuracies) != len(labels):
         raise ValueError("accuracies and labels must have the same length.")
 
@@ -272,7 +272,7 @@ def visualize_4d_tensor(tensor, title="Pruned Weights in Conv1", save_path="./pl
     print(f"Pruned weights visualization saved")
 
 
-def plot_KD_metrics(train_losses, train_hint_losses, train_distillation_losses, train_accuracies, val_losses, val_accuracies, epochs, exp_name):
+def plot_KD_metrics(train_losses, train_KD_losses, train_accuracies, val_losses, val_accuracies, epochs, exp_name, KD_variant="hints"):
     epochs_range = range(1, epochs + 1)
 
     plt.figure(figsize=(14, 10))
@@ -280,8 +280,10 @@ def plot_KD_metrics(train_losses, train_hint_losses, train_distillation_losses, 
     # Plot losses
     plt.subplot(2, 1, 1)
     plt.plot(epochs_range, train_losses, label="Train Loss")
-    plt.plot(epochs_range, train_hint_losses, label="Hint Loss")
-    plt.plot(epochs_range, train_distillation_losses, label="Distillation Loss")
+    if KD_variant == "hints":
+        plt.plot(epochs_range, train_KD_losses, label="Hint Loss")
+    else:
+        plt.plot(epochs_range, train_KD_losses, label="Distillation Loss")
     plt.plot(epochs_range, val_losses, label="Validation Loss")
     plt.xlabel("Epochs")
     plt.ylabel("Loss")
