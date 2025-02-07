@@ -312,7 +312,6 @@ def copy_weights(pruned_model, rebuilt_model, nonzero_channels):
                         reduced_layer.weight.data[i,j] = pruned_layer.weight.data[dim0, dim1]
                         n += 1
      
-     
                 
 def copy_weights_from_dict(pruned_model, unpruned_weights):
     for name, module in pruned_model.named_modules():
@@ -331,6 +330,7 @@ def rebuilt_bigger(channel_dict_path, state_dict_path, device):
     return model
 
 
+# NOT IN USE    
 def get_pruned_indices_and_counts(model):
     """
     Analyze a structurally pruned model to determine:
@@ -377,73 +377,6 @@ def get_pruned_indices_and_counts(model):
             else:
                 pruned_weights[name] = weights[pruned_dim0, :, :, :]
     
-    return pruned_info, num_pruned_channels, pruned_weights
-
-
-def get_pruned_indices_and_counts_with_ignore(pruned_model, original_model, ignore_dim0=None, ignore_dim1=None):
-    """
-    Analyze a structurally pruned model to determine:
-    - The indices of newly pruned channels (dim 0 and dim 1), ignoring previously handled indices.
-    - The number of newly pruned channels in each layer.
-    - A single tensor of the original weights for newly pruned indices.
-
-    Parameters:
-    - pruned_model: The structurally pruned PyTorch model.
-    - original_model: The original (unpruned) PyTorch model.
-    - ignore_dim0: Dictionary with layer names and dim0 indices to ignore.
-    - ignore_dim1: Dictionary with layer names and dim1 indices to ignore.
-
-    Returns:
-    - pruned_info: A dictionary containing newly pruned indices for each layer.
-    - num_pruned_channels: A dictionary with the number of newly pruned channels for each layer.
-    - pruned_weights: A dictionary with a single tensor containing the original weights of newly pruned indices.
-    """
-    pruned_info = {}
-    num_pruned_channels = {}
-    pruned_weights = {}
-
-    for (pruned_name, pruned_layer), (orig_name, orig_layer) in zip(
-        pruned_model.named_modules(), original_model.named_modules()
-    ):
-        if isinstance(pruned_layer, nn.Conv2d):  # Only process Conv2d layers
-            layer_info = {}
-
-            # Get the weight tensors from both models
-            pruned_weights_tensor = pruned_layer.weight.detach()
-            original_weights_tensor = orig_layer.weight.detach()
-
-            # Identify pruned filters along dim=0 (output channels)
-            all_pruned_dim0 = torch.nonzero(pruned_weights_tensor.abs().sum(dim=(1, 2, 3)) == 0).squeeze().tolist()
-            if isinstance(all_pruned_dim0, int):  # Handle single index case
-                all_pruned_dim0 = [all_pruned_dim0]
-            
-            # Ignore previously handled indices for dim0
-            ignored_dim0 = set(ignore_dim0[pruned_name]) if ignore_dim0 else set()
-            new_pruned_dim0 = [idx for idx in all_pruned_dim0 if idx not in ignored_dim0]
-            layer_info['pruned_dim0'] = new_pruned_dim0
-
-            # Identify pruned filters along dim=1 (input channels)
-            all_pruned_dim1 = torch.nonzero(pruned_weights_tensor.abs().sum(dim=(0, 2, 3)) == 0).squeeze().tolist()
-            if isinstance(all_pruned_dim1, int):  # Handle single index case
-                all_pruned_dim1 = [all_pruned_dim1]
-            
-            # Ignore previously handled indices for dim1
-            ignored_dim1 = set(ignore_dim1[pruned_name]) if ignore_dim1 else set()
-            new_pruned_dim1 = [idx for idx in all_pruned_dim1 if idx not in ignored_dim1]
-            layer_info['pruned_dim1'] = new_pruned_dim1
-
-            # Store the number of newly pruned channels
-            num_pruned_channels[pruned_name] = (len(new_pruned_dim0), len(new_pruned_dim1))
-
-            # Save layer info
-            pruned_info[pruned_name] = layer_info
- 
-            # Save pruned weights
-            if new_pruned_dim0 and new_pruned_dim1:
-                pruned_weights[pruned_name] = original_weights_tensor[new_pruned_dim0, :, :, :][:, new_pruned_dim1, :, :]
-            else:
-                pruned_weights[pruned_name] = original_weights_tensor[new_pruned_dim0, :, :, :]
-
     return pruned_info, num_pruned_channels, pruned_weights
 
 
@@ -557,9 +490,6 @@ def get_rebuild_channels(unpruned_channels, pruned_channels):
         
     return new_channels_dict
 
-def get_batchnorm():
-    pass
-
 
 def get_core_weights(pruned_model, unpruned_weights):
     for name, module in pruned_model.named_modules():
@@ -567,7 +497,34 @@ def get_core_weights(pruned_model, unpruned_weights):
             unpruned_weights[name] = module.weight.data
 
 
-def reconstruct_Global_weights_from_dicts(model, pruned_indices, pruned_weights, unpruned_indices, unpruned_weights):
+# Function to replace weights from Lower model to Higher model
+def replace_previous_weights(model, pruned_indices, unpruned_indices, unpruned_weights):
+    for name, layer in model.named_modules():
+        if isinstance(layer, nn.Conv2d):
+            new_device = layer.weight.device
+
+            # Retrieve pruned and unpruned indices
+            pruned_dim0, pruned_dim1 = pruned_indices[name].values()
+            unpruned_dim0, unpruned_dim1 = unpruned_indices[name].values()
+
+            # Combine and sort
+            combined_dim0 = sorted(pruned_dim0 + unpruned_dim0)
+            combined_dim1 = sorted(pruned_dim1 + unpruned_dim1)
+
+            # Find new indices for list1 and list2
+            new_unpruned_dim0 = [combined_dim0.index(x) for x in unpruned_dim0]
+            new_unpruned_dim1 = [combined_dim1.index(x) for x in unpruned_dim1]
+
+            for i in range(len(new_unpruned_dim0)):
+                out_idx = new_unpruned_dim0[i]  # Output channel index
+                for j in range(len(new_unpruned_dim1)):
+                    in_idx = new_unpruned_dim1[j]   # Input channel index
+                    layer.weight.data[out_idx, in_idx, :, :] = unpruned_weights[name][i, j].to(new_device)
+
+    return model
+
+
+def reconstruct_Global_weights_from_dicts(model, pruned_indices, pruned_weights, unpruned_indices, unpruned_weights, freezing=False):
     """
     Reconstruct weights for a model using pruned and unpruned indices and tensors.
 
@@ -623,63 +580,37 @@ def reconstruct_Global_weights_from_dicts(model, pruned_indices, pruned_weights,
             new_pruned_dim1 = [combined_dim1.index(x) for x in pruned_dim1]
             new_unpruned_dim1 = [combined_dim1.index(x) for x in unpruned_dim1]
 
-            # print(weight[0, 0])
-
             # Assign pruned weights
-            if pruned_dim0 and pruned_dim1:
-                # layer.weight[new_pruned_dim0][:, new_pruned_dim1, :, :].copy_(pruned_weights[name].to(new_device))
-                # layer.weight[new_pruned_dim0][:, new_pruned_dim1, :, :] = pruned_weights[name].to(new_device)
-                for i in range(len(new_pruned_dim0)):
+            for i in range(len(new_pruned_dim0)):
                     out_idx = new_pruned_dim0[i]  # Output channel index
                     for j in range(len(new_pruned_dim1)):
                         in_idx = new_pruned_dim1[j]   # Input channel index
                         layer.weight.data[out_idx, in_idx, :, :] = pruned_weights[name][i, j].to(new_device)
-                # weight[new_pruned_dim0][:, new_pruned_dim1, :, :] = pruned_weights[name].to(new_device)
-                # layer.weight.index_put_((torch.tensor(new_pruned_dim0), torch.tensor(new_pruned_dim1)), pruned_weights[name].to(layer.weight.device))
-            else:
-                for i in range(len(new_pruned_dim0)):
-                    out_idx = new_pruned_dim0[i]  # Output channel index
-                    layer.weight.data[out_idx, :, :, :] = pruned_weights[name][i].to(new_device)
-                # weight[new_pruned_dim0,:,:,:] = pruned_weights[name].to(new_device)
-
             
             # Assign unpruned weights
             # layer.weight.index_put_((torch.tensor(new_unpruned_dim0), torch.tensor(new_unpruned_dim1)), unpruned_weights[name].to(layer.weight.device))
             # layer.weight[new_unpruned_dim0][:,new_unpruned_dim1,:,:] = unpruned_weights[name].to(new_device)
+            # weight[new_unpruned_dim0][:,new_unpruned_dim1,:,:] = unpruned_weights[name].to(new_device)
+            # layer.weight[new_unpruned_dim0][:,new_unpruned_dim1,:,:].requires_grad = False
+            # layer.weight[new_unpruned_dim0][:,new_unpruned_dim1,:,:].copy_(unpruned_weights[name].to(new_device))
+
             for i in range(len(new_unpruned_dim0)):
                     out_idx = new_unpruned_dim0[i]  # Output channel index
                     for j in range(len(new_unpruned_dim1)):
                         in_idx = new_unpruned_dim1[j]   # Input channel index
                         layer.weight.data[out_idx, in_idx, :, :] = unpruned_weights[name][i, j].to(new_device)
-            # weight[new_unpruned_dim0][:,new_unpruned_dim1,:,:] = unpruned_weights[name].to(new_device)
-            # layer.weight[new_unpruned_dim0][:,new_unpruned_dim1,:,:].requires_grad = False
-            # layer.weight[new_unpruned_dim0][:,new_unpruned_dim1,:,:].copy_(unpruned_weights[name].to(new_device))
 
-            
             # Channel Freezing
-            for i in range(len(new_unpruned_dim0)):
-                    out_idx = new_unpruned_dim0[i]  # Output channel index
-                    for j in range(len(new_unpruned_dim1)):
-                        in_idx = new_unpruned_dim1[j]   # Input channel index
-                        layer.weight.data[out_idx, in_idx, :, :].requires_grad = False
+            if freezing:
+                for i in range(len(new_unpruned_dim0)):
+                        out_idx = new_unpruned_dim0[i]  # Output channel index
+                        for j in range(len(new_unpruned_dim1)):
+                            in_idx = new_unpruned_dim1[j]   # Input channel index
+                            layer.weight.data[out_idx, in_idx, :, :].requires_grad = False
 
+                print(name, layer.weight.requires_grad)
 
-            # weight = weight.to(new_device)
-            # print(weight[0,0])
-
-            # layer.weight = nn.Parameter(weight)
-            # layer.weight.data = weight
-
-            # with torch.no_grad():
-            #     # layer.weight.copy_(weight)
-            #     layer.weight.copy_(torch.zeros_like(weight, device=new_device))
-            
-            # print(layer.weight[4,4])
-
-            # check_overlap(layer.weight, pruned_weights[name])
-            # check_overlap(layer.weight, weight)
-
-    return model
+    return model, new_unpruned_dim0, new_unpruned_dim1
 
 def reconstruct_weights_from_dicts(model, pruned_indices, pruned_weights, unpruned_indices, unpruned_weights):
     """
@@ -734,28 +665,48 @@ def reconstruct_weights_from_dicts(model, pruned_indices, pruned_weights, unprun
             
     return model
                        
-                       
 
-def freeze_channels(model, freeze_dict):
+def get_batchnorm():
+    pass
+
+# Function to create masks for each parameter
+def create_mask(param, dim0_indices, dim1_indices):
+    mask = torch.ones_like(param, dtype=torch.bool)  # Initialize all False
+    for i in dim0_indices:
+        for j in dim1_indices:
+            if i <= param.shape[0] and j <= param.shape[1]:  # Ensure indices are in range
+                mask[i, j, :, :] = False # Mark these indices to be zeroed
+    return mask
+
+# Hook function to apply the mask
+def mask_gradients(grad, mask):
+    grad[mask] = 0  # Zero out specific indices
+    return grad
+
+#Approach1: Use of hooks to freeze gradients at once
+def freeze_grads(model, new_unpruned_dim0, new_unpruned_dim1):
+ 
     for name, layer in model.named_modules():
-        if isinstance(layer, nn.Conv2d):  # Only target Conv2D layers
-            if name in freeze_dict:
-                # Retrieve the frozen indices for dim0 (channels) and dim1 (spatial filters)
-                frozen_dim0_indices = freeze_dict[name].get('unpruned_dim0', [])
-                frozen_dim1_indices = freeze_dict[name].get('unpruned_dim1', [])
-                
-                # Freeze channels by setting requires_grad=False
-                for idx in frozen_dim0_indices:
-                    # Freeze the channels (dim 0)
-                    layer.weight.data[idx].requires_grad = False
-                    if layer.bias is not None:
-                        layer.bias[idx].requires_grad = False
+        if isinstance(layer, nn.Conv2d):
 
-                for idx in frozen_dim1_indices:
-                    # Freeze the spatial filters (dim 1)
-                    layer.weight.data[:, idx, :, :].requires_grad = False
+            # Create and store masks for each parameter
+            mask = create_mask(layer.weight, new_unpruned_dim0, new_unpruned_dim1)
+
+            # Register hooks for each parameter
+            layer.weight.register_hook(lambda grad, mask=mask: mask_gradients(grad, mask))
 
     return model
+
+#Approach2: Converts gradients to zero in each training epoch
+def zero_out_gradients(model, dim0_indices, dim1_indices):
+    for name, layer in model.named_modules():
+        if isinstance(layer, nn.Conv2d):
+            if layer.weight.grad is not None:
+                for i in dim0_indices:
+                    for j in dim1_indices:
+                        if i <= layer.weight.shape[0] and j <= layer.weight.shape[1]:  # Ensure indices are in range
+                            layer.weight.grad[i, j, :, :] = 0  # Zero out specific gradient indices
+
 
 
 def freeze_channels_2d(model, channel_indices):
@@ -779,12 +730,21 @@ def freeze_channels_2d(model, channel_indices):
             indices = channel_indices[name]
             frozen_dim0 = indices.get('unpruned_dim0', [])
             frozen_dim1 = indices.get('unpruned_dim1', [])
+
+            print(layer.weight.requires_grad)
+            print(layer.weight.grad[frozen_dim0, :, :, :])
+            print(layer.weight.grad.shape)
+            print(len(frozen_dim0))
+            print(layer.weight.grad[frozen_dim0, :, :, :].shape)
             
             if layer.weight.requires_grad:
                 # Register hook to zero gradients in both dimensions
+                print("inside")
                 layer.weight.register_hook(
                     lambda grad, frozen_dim0=frozen_dim0, frozen_dim1=frozen_dim1: freeze_grad_hook(grad, frozen_dim0, frozen_dim1)
                 )
+            print(layer.weight.grad[frozen_dim0, :, :, :])
+            exit()
             
             # If the layer has bias, freeze only corresponding to `dim0` since biases don't have `dim1`
             if layer.bias is not None and layer.bias.requires_grad:
@@ -804,7 +764,6 @@ def validate_frozen_channels(model, channel_indices):
     Returns:
         A boolean indicating whether the specified channels are frozen.
     """
-    # all_frozen = True
 
     for name, layer in model.named_modules():
         if isinstance(layer, nn.Conv2d) and name in channel_indices:
@@ -861,10 +820,13 @@ def check_overlap(big_tensor, small_tensor):
 
     print(f"Overlap found: {overlap.any().item()}")  # True if there's at least one overlap
     print(f"Matching values: {small_tensor[overlap].shape}")  # Prints matching values
+    print(f"All values Nested: {small_tensor.flatten().shape == small_tensor[overlap].shape}")
 
 
     
 if __name__ == '__main__':
+
+    # Example usage
 
     model = SimpleCNN()
     Index_Aware_pruner(model, amount=0.2, plot=False)

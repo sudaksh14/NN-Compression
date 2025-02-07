@@ -71,7 +71,7 @@ def plot_curves(num_epochs, train_losses, train_accuracies, prune_ratio, exp_nam
    
    
     
-def plot_curves_with_val(num_epochs, train_losses, train_accuracies, val_losses, val_accuracies, lrs, prune_ratio, exp_name):
+def plot_curves_with_val(num_epochs, train_losses, train_accuracies, val_losses, val_accuracies, lrs, exp_name):
     
     # Plot the training and validation loss curves
     plt.figure(figsize=(16, 8))

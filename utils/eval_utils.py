@@ -93,7 +93,7 @@ def profile_model(model, input_size):
     return params, macs, size_mb, latency
 
 
-def model_summary_with_frozen_counts(model, input_size, summary=False):
+def model_summary_with_frozen_counts(model, input_size=(3, 32, 32), summary=False):
     """
     Generate a summary of the model, including counts of frozen and unfrozen parameters.
     

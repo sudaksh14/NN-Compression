@@ -11,6 +11,7 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 from utils.visualize_utils import plot_curves_with_val, plot_KD_metrics
 from tqdm import tqdm
+from utils.prune_utils import replace_previous_weights, zero_out_gradients
 
 # Set device for training and evaluation
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -217,7 +218,7 @@ def save_statedict(model, channel_dict, path="./saves/state_dicts"):
 
 
 
-def fine_tuner(model, train_loader, val_loader, num_epochs, optim_type, scheduler_type, prune_ratio, exp_name, device=device, LR=1e-3):
+def fine_tuner_core(model, train_loader, val_loader, num_epochs, optim_type, scheduler_type, exp_name, device=device, LR=1e-3):
 
     model = model.to(device)
 
@@ -312,29 +313,35 @@ def fine_tuner(model, train_loader, val_loader, num_epochs, optim_type, schedule
         
         print(f"Epoch [{epoch+1}/{num_epochs}], "f"Train Loss: {epoch_loss:.4f}, Train Accuracy: {epoch_accuracy:.4f}, Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_accuracy:.2f}, Learning Rate: {current_lr:.6f}")
     
-    plot_curves_with_val(num_epochs, train_losses, train_accuracies, val_losses, val_accuracies, lrs, prune_ratio, exp_name)
+    plot_curves_with_val(num_epochs, train_losses, train_accuracies, val_losses, val_accuracies, lrs, exp_name)
     del optimizer
            
-    print("Fine-Tuning Complete")          
-             
+    print("Fine-Tuning Complete")        
 
-def fine_tuner_tqdm(model, train_loader, val_loader, num_epochs, scheduler_type, prune_ratio, exp_name, device=device, LR=1e-3):
+
+def fine_tuner_rebuilt(model, train_loader, val_loader, freeze_dim0, freeze_dim1, num_epochs, optim_type, scheduler_type, exp_name, device=device, LR=1e-3):
 
     model = model.to(device)
 
     # Define loss function and optimizer
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=LR)
+
+    if optim_type == 'SGD':
+        optimizer = optim.SGD(model.parameters(), lr=LR, momentum=0.9, weight_decay=5e-4)
+    else:
+        optimizer = optim.Adam(model.parameters(), lr=LR)
     
     # Define LR scheduler
     if scheduler_type == 'step':
-        scheduler = StepLR(optimizer, step_size=50, gamma=0.1)
+        scheduler = StepLR(optimizer, step_size=int(num_epochs*0.25), gamma=0.1)
     elif scheduler_type == 'exponential':
         scheduler = ExponentialLR(optimizer, gamma=0.95)
     elif scheduler_type == 'cyclic':
-        scheduler = CyclicLR(optimizer, base_lr=1e-5, max_lr=0.01, step_size_up=20, mode='triangular2')
+        scheduler = CyclicLR(optimizer, base_lr=1e-5, max_lr=0.01, step_size_up=int(num_epochs*0.1), mode='triangular2')
+    elif scheduler_type == 'cosine':
+        scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=0)
     else:
-        scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=1e-5)
+        scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=int(num_epochs*0.2))
         
 
     train_losses = []
@@ -344,7 +351,116 @@ def fine_tuner_tqdm(model, train_loader, val_loader, num_epochs, scheduler_type,
     lrs = []  # To track learning rates
 
     # Fine-tuning loop
-    for epoch in tqdm(range(num_epochs), desc="Epochs"):
+    for epoch in range(num_epochs):
+        model.train()
+        train_loss = 0.0
+        correct = 0
+        total = 0
+        for inputs, labels in train_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            
+            optimizer.zero_grad()
+            
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            
+            loss.backward()
+            zero_out_gradients(model, freeze_dim0, freeze_dim1)
+            optimizer.step()
+            
+            train_loss += loss.item() * inputs.size(0)
+            _, predicted = torch.max(outputs, 1)
+            correct += (predicted == labels).sum().item()
+            total += labels.size(0)
+
+        # Calculate average loss and accuracy for the epoch
+        epoch_loss = train_loss / len(train_loader.dataset)
+        epoch_accuracy = correct / total
+        train_losses.append(epoch_loss)
+        train_accuracies.append(epoch_accuracy)
+        
+        # Validation loop
+        model.eval()
+        val_loss = 0
+        correct = 0
+        total = 0
+
+        with torch.no_grad():
+            for images, labels in val_loader:
+                images, labels = images.to(device), labels.to(device)
+
+                # Forward pass
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+
+                # Accumulate validation metrics
+                val_loss += loss.item() * images.size(0)
+                _, predicted = outputs.max(1)
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+
+        val_loss /= total
+        val_accuracy = correct / total
+        val_losses.append(val_loss)
+        val_accuracies.append(val_accuracy)
+
+        # Step the scheduler and track learning rate
+        if scheduler_type == 'Default':
+            scheduler.step(val_loss)
+        else:    
+            scheduler.step()
+        
+        current_lr = scheduler.get_last_lr()[0]
+        lrs.append(current_lr)
+        
+        print(f"Epoch [{epoch+1}/{num_epochs}], "f"Train Loss: {epoch_loss:.4f}, Train Accuracy: {epoch_accuracy:.4f}, Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_accuracy:.2f}, Learning Rate: {current_lr:.6f}")
+    
+    plot_curves_with_val(num_epochs, train_losses, train_accuracies, val_losses, val_accuracies, lrs, exp_name)
+    del optimizer
+           
+    print("Fine-Tuning Complete")        
+
+
+def fine_tuner_BN(model, train_loader, val_loader, num_epochs, num_epochs_BN, optim_type, scheduler_type, exp_name, pruned_indices, unpruned_indices, unpruned_weights, device=device, LR=1e-3):
+
+    model = model.to(device)
+
+    # Define loss function and optimizer
+    criterion = nn.CrossEntropyLoss()
+
+    if optim_type == 'SGD':
+        optimizer = optim.SGD(model.parameters(), lr=LR, momentum=0.9, weight_decay=5e-4)
+    else:
+        optimizer = optim.Adam(model.parameters(), lr=LR)
+    
+    # Define LR scheduler
+    if scheduler_type == 'step':
+        scheduler = StepLR(optimizer, step_size=int((num_epochs+num_epochs_BN)*0.25), gamma=0.1)
+    elif scheduler_type == 'exponential':
+        scheduler = ExponentialLR(optimizer, gamma=0.95)
+    elif scheduler_type == 'cyclic':
+        scheduler = CyclicLR(optimizer, base_lr=1e-5, max_lr=0.01, step_size_up=int((num_epochs+num_epochs_BN)*0.1), mode='triangular2')
+    elif scheduler_type == 'cosine':
+        scheduler = CosineAnnealingLR(optimizer, T_max=(num_epochs+num_epochs_BN), eta_min=0)
+    else:
+        scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=int((num_epochs+num_epochs_BN)*0.2))
+        
+
+    train_losses = []
+    train_accuracies = []
+    val_losses = []
+    val_accuracies = []
+    lrs = []  # To track learning rates
+
+    # Fine-tuning loop
+    for epoch in range(num_epochs+num_epochs_BN):
+
+        if epoch == num_epochs:
+            model = replace_previous_weights(model, pruned_indices, unpruned_indices, unpruned_weights)
+            for name, layer in model.named_modules():
+                if isinstance(layer, nn.Conv2d):
+                    layer.weight.requires_grad = False # Only Freeze Conv2D layers
+
         model.train()
         train_loss = 0.0
         correct = 0
@@ -371,11 +487,6 @@ def fine_tuner_tqdm(model, train_loader, val_loader, num_epochs, scheduler_type,
         train_losses.append(epoch_loss)
         train_accuracies.append(epoch_accuracy)
         
-        # Step the scheduler and track learning rate
-        scheduler.step()
-        current_lr = scheduler.get_last_lr()[0]
-        lrs.append(current_lr)
-        
         # Validation loop
         model.eval()
         val_loss = 0
@@ -400,13 +511,21 @@ def fine_tuner_tqdm(model, train_loader, val_loader, num_epochs, scheduler_type,
         val_accuracy = correct / total
         val_losses.append(val_loss)
         val_accuracies.append(val_accuracy)
+
+        # Step the scheduler and track learning rate
+        if scheduler_type == 'Default':
+            scheduler.step(val_loss)
+        else:    
+            scheduler.step()
         
-        print(f"Epoch [{epoch+1}/{num_epochs}], "f"Train Loss: {epoch_loss:.4f}, Train Accuracy: {epoch_accuracy:.4f}, Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_accuracy:.2f}, Learning Rate: {current_lr:.6f}")
+        current_lr = scheduler.get_last_lr()[0]
+        lrs.append(current_lr)
+        
+        print(f"Epoch [{epoch+1}/{(num_epochs+num_epochs_BN)}], "f"Train Loss: {epoch_loss:.4f}, Train Accuracy: {epoch_accuracy:.4f}, Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_accuracy:.2f}, Learning Rate: {current_lr:.6f}")
     
-    # plot_curves_with_val(num_epochs, train_losses, train_accuracies, val_losses, val_accuracies, lrs, prune_ratio, exp_name)
-    del optimizer
+    plot_curves_with_val((num_epochs+num_epochs_BN), train_losses, train_accuracies, val_losses, val_accuracies, lrs, exp_name)
            
-    print("Fine-Tuning Complete")
+    print("Fine-Tuning Complete")     
 
 
 
@@ -620,7 +739,7 @@ def train_student_with_distillation(student, teacher, train_loader, val_loader, 
     return train_avg_loss, train_avg_distillation_loss, train_accuracy, val_avg_loss, val_accuracy
 
 
-def KD_trainer(student, teacher, train_loader, val_loader, teacher_channels, student_channels, lr, num_epochs=1, exp_name="KD", KD_variant="hints"):
+def KD_trainer(student, teacher, train_loader, val_loader, teacher_channels, student_channels, lr, alpha, beta, num_epochs=1, exp_name="KD", KD_variant="hints"):
     train_losses = []
     if KD_variant == "hints":
         train_hint_losses = []
@@ -636,7 +755,7 @@ def KD_trainer(student, teacher, train_loader, val_loader, teacher_channels, stu
                 student, teacher, train_loader, val_loader, teacher_channels, student_channels, lr)
         else:
             train_avg_loss, train_avg_distillation_loss, train_accuracy, val_avg_loss, val_accuracy = train_student_with_distillation(
-                student, teacher, train_loader, val_loader, lr)
+                student, teacher, train_loader, val_loader, lr, alpha, beta)
 
 
         train_losses.append(train_avg_loss)

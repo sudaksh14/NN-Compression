@@ -80,7 +80,7 @@ print(f"Number of Train samples: {len(train_dataset)}")
 print(f"Number of Val samples: {len(val_dataset)}")
 print(f"Number of Test samples: {len(test_dataset)}")
 
-def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3, 0.3, 0.3], model_name="Resnet18", epochs=20, lr=1e-3, optim="adam", exp_name="ToyExp_Iter_Adaptivity_Resnet20", rebuild=True, KD=True):
+def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3, 0.3, 0.3], model_name="Resnet18", epochs=20, lr=1e-3, optim="adam", alpha=0.75, beta=3, exp_name="ToyExp_Iter_Adaptivity_Resnet20", rebuild=True, KD=True):
     
     assert prune_steps == len(prune_ratio), f"Expected Prune steps ({prune_steps}) to match the length of prune ratios ({len(prune_ratio)})."
 
@@ -151,7 +151,7 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
 
     # Core Model Training
     if KD:
-        KD_trainer(teacher=orig_copy, student=core_model, train_loader=train_loader, val_loader=val_loader, teacher_channels=64, student_channels=unprune_meta_data[-1]["num_unpruned_channels"]['features.40'][0], lr=lr, num_epochs=epochs, exp_name=f"{exp_name}_Training_Core_model", KD_variant="distill")
+        KD_trainer(teacher=orig_copy, student=core_model, train_loader=train_loader, val_loader=val_loader, teacher_channels=64, student_channels=unprune_meta_data[-1]["num_unpruned_channels"]['layer3.2.conv2'][0], lr=lr, alpha=alpha, beta=beta, num_epochs=epochs, exp_name=f"{exp_name}_Training_Core_model", KD_variant="distill")
     else:
         fine_tuner(core_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, prune_ratio=0.3, exp_name=f"{exp_name}_Training_core_model_Level-4", LR=lr)
     
@@ -163,7 +163,7 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
     profiling["MAC's"].append(mac_core)
     profiling["model_size"].append(size_mb_core)
     profiling["latency"].append(latency_core)
-    model_summary_with_frozen_counts(core_model, input_size=(3, 32, 32)) 
+    model_summary_with_frozen_counts(core_model) 
 
     if rebuild:
 
@@ -180,10 +180,10 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
 
             rebuilt_model = reconstruct_weights_from_dicts(rebuilt_model, pruned_indices=prune_meta_data[i]["zero_channels_info"], pruned_weights=prune_meta_data[i]["pruned_weights"], unpruned_indices=unprune_meta_data[i]["non_zero_channels_info"], unpruned_weights=unprune_meta_data[i]["unpruned_weights"])
             # rebuilt_model = freeze_channels_2d(rebuilt_model, unprune_meta_data[i]["non_zero_channels_info"])
-            model_summary_with_frozen_counts(rebuilt_model, input_size=(3, 32, 32))
+            model_summary_with_frozen_counts(rebuilt_model)
             
             if KD:
-                KD_trainer(teacher=orig_copy, student=rebuilt_model, train_loader=train_loader, val_loader=val_loader, teacher_channels=64, student_channels=new_channels['features.40'][0], lr=lr, num_epochs=epochs, exp_name=f"{exp_name}_Training_model_Level-{i+1}", KD_variant="distill")
+                KD_trainer(teacher=orig_copy, student=rebuilt_model, train_loader=train_loader, val_loader=val_loader, teacher_channels=64, student_channels=new_channels['layer3.2.conv2'][0], lr=lr, alpha=alpha, beta=beta, num_epochs=epochs, exp_name=f"{exp_name}_Training_model_Level-{i+1}", KD_variant="distill")
             else:
                 fine_tuner(rebuilt_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, prune_ratio=0.3, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=lr)
             # check = validate_frozen_channels(rebuilt_model, unprune_meta_data[i]["non_zero_channels_info"])
@@ -206,7 +206,7 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
         else:
             plot_multilevel(accuracy_list, exp_name, labels=["Original", "Level-4", "Level-3", "Level-2", "Level-1"])
             plot_profiling(profiling["params"], profiling["MAC's"], profiling["model_size"], exp_name, labels=["Original", "Level-4", "Level-3", "Level-2", "Level-1"])
-
+            
         return accuracy_list, profiling
 
 
@@ -226,12 +226,12 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
     profiling = {"params":[], "MAC's":[], "model_size":[], "latency":[]}
     
     print(f"{"-"*20}Starting with Experiment {exp_name}{"-"*20}")
-    acc_original, f1_original, params_original, mac_original, size_mb_original, latency_original = evaluate(original_model, test_loader, profiling=True)
-    accuracy_list.append(acc_original)
-    profiling["params"].append(params_original)
-    profiling["MAC's"].append(mac_original)
-    profiling["model_size"].append(size_mb_original)
-    profiling["latency"].append(latency_original)
+    # acc_original, f1_original, params_original, mac_original, size_mb_original, latency_original = evaluate(original_model, test_loader, profiling=True)
+    # accuracy_list.append(acc_original)
+    # profiling["params"].append(params_original)
+    # profiling["MAC's"].append(mac_original)
+    # profiling["model_size"].append(size_mb_original)
+    # profiling["latency"].append(latency_original)
                        
     prune_meta_data = []
     unprune_meta_data = []
@@ -240,7 +240,6 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
 
     # Iterative Pruning of Original Model
     for i in range(prune_steps):
-        # TODO: Implement Global Index Aware Pruning
         original_model, pruned_index = Index_Aware_pruner(original_model, amount=prune_ratio[i], prune_step=i, plot=False)
         zero_channels_info, num_pruned_channels, pruned_weights = get_pruned_channels_weights(orig_copy, pruned_index)
         non_zero_channels_info, num_unpruned_channels, unpruned_weights = get_unpruned_indices_and_counts(original_model)
@@ -273,16 +272,17 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
 
     
 
-    fine_tuner(core_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, prune_ratio=0.3, exp_name=f"{exp_name}_Training_core_model_Level-4", LR=lr)
-    acc_pruned, f1_pruned, params_core, mac_core, size_mb_core, latency_core = evaluate(core_model, test_loader, profiling=True)
+    fine_tuner_core(core_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_core_model_Level-{str(prune_steps+1)}", LR=lr)
+    # fine_tuner_BN(core_model, train_loader, val_loader, num_epochs=epochs, num_epochs_BN=10, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_core_model_Level-{str(prune_steps+1)}", LR=lr)
+    # acc_pruned, f1_pruned, params_core, mac_core, size_mb_core, latency_core = evaluate(core_model, test_loader, profiling=True)
     # torch.onnx.export(core_model, (torch.randn(1, 3, 32, 32).to(device),), f=f"./saves/onnx/{model_name}_Core_Model.onnx")
-    # save_statedict(core_model, unprune_meta_data[-1]["num_unpruned_channels"], path=f"./saves/state_dicts/{model_name}_Core_Model.pth")
-    accuracy_list.append(acc_pruned)
-    profiling["params"].append(params_core)
-    profiling["MAC's"].append(mac_core)
-    profiling["model_size"].append(size_mb_core)
-    profiling["latency"].append(latency_core)
-    model_summary_with_frozen_counts(core_model, input_size=(3, 32, 32)) 
+    save_statedict(core_model, unprune_meta_data[-1]["num_unpruned_channels"], path=f"./saves/state_dicts/{exp_name}_{model_name}_Core_Model.pth")
+    # accuracy_list.append(acc_pruned)
+    # profiling["params"].append(params_core)
+    # profiling["MAC's"].append(mac_core)
+    # profiling["model_size"].append(size_mb_core)
+    # profiling["latency"].append(latency_core)
+    # model_summary_with_frozen_counts(core_model) 
 
     if rebuild:
 
@@ -296,18 +296,23 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
             get_core_weights(core_model, unprune_meta_data[i]["unpruned_weights"])
             del core_model
 
-            rebuilt_model = reconstruct_Global_weights_from_dicts(rebuilt_model, pruned_indices=prune_meta_data[i]["zero_channels_info"], pruned_weights=prune_meta_data[i]["pruned_weights"], unpruned_indices=unprune_meta_data[i]["non_zero_channels_info"], unpruned_weights=unprune_meta_data[i]["unpruned_weights"])
+            rebuilt_model, freeze_dim0, freeze_dim1 = reconstruct_Global_weights_from_dicts(rebuilt_model, pruned_indices=prune_meta_data[i]["zero_channels_info"], pruned_weights=prune_meta_data[i]["pruned_weights"], unpruned_indices=unprune_meta_data[i]["non_zero_channels_info"], unpruned_weights=unprune_meta_data[i]["unpruned_weights"])
+            rebuilt_model = freeze_grads(rebuilt_model, freeze_dim0, freeze_dim1)
             # rebuilt_model = freeze_channels_2d(rebuilt_model, unprune_meta_data[i]["non_zero_channels_info"])
-            model_summary_with_frozen_counts(rebuilt_model, input_size=(3, 32, 32))
+            # check = validate_frozen_channels(rebuilt_model, unprune_meta_data[i]["non_zero_channels_info"])
+            # print(f"Channel Freezing applied correctly: {check}")
+            model_summary_with_frozen_counts(rebuilt_model)
             
-            fine_tuner(rebuilt_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, prune_ratio=0.3, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=lr)
+            fine_tuner_rebuilt(rebuilt_model, train_loader, val_loader, freeze_dim0, freeze_dim1, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=lr)
+            # fine_tuner_BN(rebuilt_model, train_loader, val_loader, num_epochs=epochs, num_epochs_BN=10, optim_type=optim, scheduler_type=scheduler, 
+            #               exp_name=f"{exp_name}_Training_model_Level-{i+1}", pruned_indices=prune_meta_data[i]["zero_channels_info"], unpruned_indices=unprune_meta_data[i]["non_zero_channels_info"], unpruned_weights=unprune_meta_data[i]["unpruned_weights"], LR=lr)
             # check = validate_frozen_channels(rebuilt_model, unprune_meta_data[i]["non_zero_channels_info"])
             # print(f"Channel Freezing applied correctly: {check}")
             acc_rebuilt, f1_rebuilt, params_rebuilt, mac_rebuilt, size_mb_rebuilt, latency_rebuilt = evaluate(rebuilt_model, test_loader, profiling=True)
             # torch.onnx.export(rebuilt_model, (torch.randn(1, 3, 32, 32).to(device),), f=f"./saves/onnx/{model_name}_Descendant_Model_Level-{i+1}.onnx")
-            # save_statedict(rebuilt_model, new_channels, path=f"./saves/state_dicts/{model_name}_Descendant_Model_Level-{i+1}.pth")
+            save_statedict(rebuilt_model, new_channels, path=f"./saves/state_dicts/{exp_name}_{model_name}_Descendant_Model_Level-{i+1}.pth")
             core_model = rebuilt_model
-
+            del rebuilt_model
             accuracy_list.append(acc_rebuilt)
             profiling["params"].append(params_rebuilt)
             profiling["MAC's"].append(mac_rebuilt)
@@ -319,71 +324,17 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
             plot_multilevel(accuracy_list, exp_name)
             plot_profiling(profiling["params"], profiling["MAC's"], profiling["model_size"], exp_name)
         else:
-            plot_multilevel(accuracy_list, exp_name, labels=["Original", "Level-4", "Level-3", "Level-2", "Level-1"])
-            plot_profiling(profiling["params"], profiling["MAC's"], profiling["model_size"], exp_name, labels=["Original", "Level-4", "Level-3", "Level-2", "Level-1"])
+            plot_multilevel(accuracy_list, exp_name, labels=['original'] + [f'Level-{i+1}' for i in range(prune_steps, -1, -1)])
+            plot_profiling(profiling["params"], profiling["MAC's"], profiling["model_size"], exp_name, labels=['original'] + [f'Level-{i+1}' for i in range(prune_steps, -1, -1)])
+            
 
         return accuracy_list, profiling
                 
-      
-        
-  
 
-if __name__ == '__main__':
-
-    # test_acc, profiling = iterative_filter_pruning(prune_steps=1, prune_ratio=[0.5], model_name="Resnet18", epochs=50, lr=1e-3, optim="adam", exp_name=f"Exp_KD_single_Iter_Adaptivity")
-    # exit()
-    # schedulers = ['cosine', 'step', 'exponential', 'cyclic', 'Default']
-    # lrs = [1e-2, 1e-3, 1e-4, 1e-5]
-    # epochs = [20, 50, 100, 200]
-    # model_name = ["Resnet18", "VGG16"]
-
-    # Experiment 1: Iterative Adaptivity with Resnet20
-    schedulers = ['cosine'] 
-    lrs = [1e-3]
-    epochs = [20]
-    model_name = ["VGG16"]
-
-    results = []
-    trial = 0
-    EXP = "KD_Iter_Adaptivity"
-
-    for sch in schedulers:
-        for lr in lrs:
-            for epoch in epochs:
-                for model in model_name:
-                    test_acc, profiling = iterative_filter_pruning(scheduler=sch, model_name=model, epochs=epoch, lr=lr, optim="adam", exp_name=f"Exp_{trial+1}_{EXP}_{model.upper()}_{sch.upper()}_{str(lr)}_{str(epoch)}", KD=True)
-                    # test_acc, profiling = Global_iterative_filter_pruning(scheduler=sch, prune_steps=1, prune_ratio=[0.5], model_name=model, epochs=epoch, lr=lr, optim="SGD", exp_name=f"Exp_{trial+1}_{EXP}_{model.upper()}_{sch.upper()}_{str(lr)}_{str(epoch)}")
-                    # test_acc, profiling = Global_iterative_filter_pruning(scheduler=sch, model_name=model, epochs=epoch, lr=lr, optim="adam", exp_name=f"Exp_{trial+1}_{EXP}_{model.upper()}_{sch.upper()}_{str(lr)}_{str(epoch)}")
-                    # test_acc, profiling = Global_iterative_filter_pruning(scheduler=sch, model_name=model, epochs=epoch, lr=lr, optim="SGD", exp_name=f"Exp_{trial+1}_{EXP}_{model.upper()}_{sch.upper()}_{str(lr)}_{str(epoch)}")
-                    
-                    results.append({
-                            "Trial": trial + 1,
-                            "Learning Rate": lr,
-                            "Epochs": epoch,
-                            "Scheduler": sch.upper(),
-                            "Test Accuracy (Original)": test_acc[0],
-                            "Test Accuracy (Core Model)": test_acc[1],
-                            "Test Accuracy (Level-3)": test_acc[2],
-                            "Test Accuracy (Level-2)": test_acc[3],
-                            "Test Accuracy (Level-1)": test_acc[4],
-                            "Num_Params": profiling["params"],
-                            "MAC's": profiling["MAC's"],
-                            "Model Size (MB)": profiling["model_size"],
-                            "Latency": profiling["latency"]
-                            })
-                    
-                    results_df = pd.DataFrame(results)
-                    results_df.to_excel(f"./saves/Results/Exp_{EXP}_{model.upper()}_results.xlsx")
-                    trial += 1
+def compare_weights():
     
-    print(f"{"-"*20}EXPERIMENT FINISHED{"-"*20}")
-    exit()
-
-
-    def compare_weights():
-    
-        path_core = "./saves/state_dicts/Exp_00_Iter_Adaptivity_Resnet18_Resnet18_Core_Model.pth"
-        path_level3 = "./saves/state_dicts/Exp_00_Iter_Adaptivity_Resnet18_Resnet18_Descendant_Model_Level-3.pth"
+        path_core = "./saves/state_dicts/Exp_1_Replace_Iter_adaptivity_RESNET18_COSINE_0.001_20_Resnet18_Core_Model.pth"
+        path_level3 = "./saves/state_dicts/Exp_1_Replace_Iter_adaptivity_RESNET18_COSINE_0.001_20_Resnet18_Descendant_Model_Level-1.pth"
 
 
         loaded_data_core = torch.load(path_core, map_location=device)
@@ -403,13 +354,62 @@ if __name__ == '__main__':
         model_level3.eval()
 
         layer_name = 'conv1'
-        # channel_index = random.randint(1, 23)
-        # print(channel_index)
 
         layer_core = dict(model_core.named_modules()).get(layer_name)
         layer_level3 = dict(model_level3.named_modules()).get(layer_name)
 
         check_overlap(layer_level3.weight.data, layer_core.weight.data)
+  
 
-        print("Core Model weights:", layer_core.weight.data[0][0])
-        print("Level-3 Model weights:", layer_level3.weight.data[0][0])
+if __name__ == '__main__':
+
+    # test_acc, profiling = iterative_filter_pruning(prune_steps=1, prune_ratio=[0.5], model_name="Resnet18", epochs=50, lr=1e-3, optim="adam", exp_name=f"Exp_KD_single_Iter_Adaptivity")
+    # exit()
+    
+    # schedulers = ['cosine', 'step', 'exponential', 'cyclic', 'Default']
+    # lrs = [1e-2, 1e-3, 1e-4, 1e-5]
+    # epochs = [20, 50, 100, 200]
+    # model_name = ["Resnet18", "VGG16"]
+
+    # Experiment 1: Iterative Adaptivity with Resnet20
+    schedulers = ['cosine'] 
+    lrs = [1e-3]
+    epochs = [1]
+    model_name = ["Resnet18"]
+    # alphas = [0, 0.25, 0.5]
+
+    results = []
+    trial = 0
+    EXP = "Freeze_Iter_adaptivity"
+
+    for sch in schedulers:
+        for lr in lrs:
+            for epoch in epochs:
+                for model in model_name:
+                    # for alpha in alphas:
+                    
+                    # test_acc, profiling = iterative_filter_pruning(scheduler=sch, model_name=model, epochs=epoch, lr=lr, alpha=alpha, optim="adam", exp_name=f"Exp_{trial+1}_{EXP}_{model.upper()}_{sch.upper()}_{str(lr)}_{str(epoch)}_{str(alpha)}", KD=True)
+                    # test_acc, profiling = Global_iterative_filter_pruning(scheduler=sch, prune_steps=1, prune_ratio=[0.5], model_name=model, epochs=epoch, lr=lr, optim="SGD", exp_name=f"Exp_{trial+1}_{EXP}_{model.upper()}_{sch.upper()}_{str(lr)}_{str(epoch)}")
+                    test_acc, profiling = Global_iterative_filter_pruning(scheduler=sch, model_name=model, epochs=epoch, lr=lr, optim="adam", exp_name=f"Exp_{trial+1}_{EXP}_{model.upper()}_{sch.upper()}_{str(lr)}_{str(epoch)}")
+                    # test_acc, profiling = Global_iterative_filter_pruning(scheduler=sch, model_name=model, epochs=epoch, lr=lr, optim="SGD", exp_name=f"Exp_{trial+1}_{EXP}_{model.upper()}_{sch.upper()}_{str(lr)}_{str(epoch)}")
+                    
+                    results.append({
+                            "Trial": trial + 1,
+                            "Learning Rate": lr,
+                            "Epochs": epoch,
+                            "Scheduler": sch.upper(),
+                            "Test Accuracy (Original)": test_acc[0],
+                            "Test Accuracy (Core Model)": test_acc[1],
+                            "Test Accuracy (Descendant Models)": test_acc[2:],
+                            "Num_Params": profiling["params"],
+                            "MAC's": profiling["MAC's"],
+                            "Model Size (MB)": profiling["model_size"],
+                            "Latency": profiling["latency"]
+                            })
+                    
+                    results_df = pd.DataFrame(results)
+                    results_df.to_excel(f"./saves/Results/Exp_{EXP}_{model.upper()}_results.xlsx")
+                    trial += 1
+    
+    print(f"{"-"*20}EXPERIMENT FINISHED{"-"*20}")
+    exit()
