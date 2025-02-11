@@ -153,7 +153,7 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
     if KD:
         KD_trainer(teacher=orig_copy, student=core_model, train_loader=train_loader, val_loader=val_loader, teacher_channels=64, student_channels=unprune_meta_data[-1]["num_unpruned_channels"]['layer3.2.conv2'][0], lr=lr, alpha=alpha, beta=beta, num_epochs=epochs, exp_name=f"{exp_name}_Training_Core_model", KD_variant="distill")
     else:
-        fine_tuner(core_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, prune_ratio=0.3, exp_name=f"{exp_name}_Training_core_model_Level-4", LR=lr)
+        fine_tuner_core(core_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, prune_ratio=0.3, exp_name=f"{exp_name}_Training_core_model_Level-4", LR=lr)
     
     acc_pruned, f1_pruned, params_core, mac_core, size_mb_core, latency_core = evaluate(core_model, test_loader, profiling=True, KD=False)
     # torch.onnx.export(core_model, (torch.randn(1, 3, 32, 32).to(device),), f=f"./saves/onnx/{model_name}_Core_Model.onnx")
@@ -185,7 +185,7 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
             if KD:
                 KD_trainer(teacher=orig_copy, student=rebuilt_model, train_loader=train_loader, val_loader=val_loader, teacher_channels=64, student_channels=new_channels['layer3.2.conv2'][0], lr=lr, alpha=alpha, beta=beta, num_epochs=epochs, exp_name=f"{exp_name}_Training_model_Level-{i+1}", KD_variant="distill")
             else:
-                fine_tuner(rebuilt_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, prune_ratio=0.3, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=lr)
+                fine_tuner_core(rebuilt_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, prune_ratio=0.3, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=lr)
             # check = validate_frozen_channels(rebuilt_model, unprune_meta_data[i]["non_zero_channels_info"])
             # print(f"Channel Freezing applied correctly: {check}")
             acc_rebuilt, f1_rebuilt, params_rebuilt, mac_rebuilt, size_mb_rebuilt, latency_rebuilt = evaluate(rebuilt_model, test_loader, profiling=True, KD=False)
@@ -218,23 +218,35 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
         original_model = torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_resnet20", pretrained=True).to(device)
     elif "VGG" in model_name:
         original_model = torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_vgg16_bn", pretrained=True).to(device)
+        optim = "SGD"
 
-    # torch.onnx.export(original_model, (torch.randn(1, 3, 32, 32).to(device),), f=f"./saves/onnx/VGG16_Original_Model.onnx")
-    # print(dir(original_model))
-    
     accuracy_list = []
     profiling = {"params":[], "MAC's":[], "model_size":[], "latency":[]}
     
     print(f"{"-"*20}Starting with Experiment {exp_name}{"-"*20}")
-    # acc_original, f1_original, params_original, mac_original, size_mb_original, latency_original = evaluate(original_model, test_loader, profiling=True)
-    # accuracy_list.append(acc_original)
-    # profiling["params"].append(params_original)
-    # profiling["MAC's"].append(mac_original)
-    # profiling["model_size"].append(size_mb_original)
-    # profiling["latency"].append(latency_original)
+    acc_original, f1_original, params_original, mac_original, size_mb_original, latency_original = evaluate(original_model, test_loader, profiling=True)
+    accuracy_list.append(acc_original)
+    profiling["params"].append(params_original)
+    profiling["MAC's"].append(mac_original)
+    profiling["model_size"].append(size_mb_original)
+    profiling["latency"].append(latency_original)
                        
     prune_meta_data = []
     unprune_meta_data = []
+    BN_data = []
+
+    bn_indices = {}
+    bn_weights = {}
+    for name, layer in original_model.named_modules():
+        if isinstance(layer, nn.BatchNorm2d):
+            bn_indices[name] = list(set(range(layer.num_features)))
+
+            bn_weights[name+"_weights"] = layer.weight.data
+            bn_weights[name+"_bias"] = layer.bias.data
+            bn_weights[name+"_runnin_mean"] = layer.running_mean
+            bn_weights[name+"_running_var"] = layer.running_var
+
+    BN_data.append({"BN_indices": bn_indices, "BN_params": bn_weights})
 
     orig_copy = deepcopy(original_model)
 
@@ -243,9 +255,11 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
         original_model, pruned_index = Index_Aware_pruner(original_model, amount=prune_ratio[i], prune_step=i, plot=False)
         zero_channels_info, num_pruned_channels, pruned_weights = get_pruned_channels_weights(orig_copy, pruned_index)
         non_zero_channels_info, num_unpruned_channels, unpruned_weights = get_unpruned_indices_and_counts(original_model)
+        BN_indices, BN_params = prune_batchnorm(orig_copy, non_zero_channels_info)
 
         prune_meta_data.append({"zero_channels_info" : zero_channels_info, "num_pruned_channels" : num_pruned_channels, "pruned_weights" : pruned_weights}) 
         unprune_meta_data.append({"non_zero_channels_info" : non_zero_channels_info, "num_unpruned_channels" : num_unpruned_channels, "unpruned_weights" : unpruned_weights})
+        BN_data.append({"BN_indices" : BN_indices, "BN_params" : BN_params})
 
     with open(f"./saves/pruning_metadata/{exp_name}_unprune_data.txt", "w") as file:
         for index, dictionary in enumerate(unprune_meta_data):
@@ -261,6 +275,13 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
                 file.write(f"  {key}: {value}\n")
             file.write("\n")  # Add a blank line between entries
 
+    with open(f"./saves/pruning_metadata/{exp_name}_BN_data.txt", "w") as file:
+        for index, dictionary in enumerate(BN_data):
+            file.write(f"Entry {index + 1}:\n")
+            for key, value in dictionary.items():
+                file.write(f"  {key}: {value}\n")
+            file.write("\n")  # Add a blank line between entries
+
     print("Pruning Metadata saved successfully.")
 
     # Core Model Training
@@ -268,21 +289,20 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
         core_model = Resnet_General(unprune_meta_data[-1]["num_unpruned_channels"]).to(device)
     elif "VGG" in model_name:
         core_model = VGG_General(unprune_meta_data[-1]["num_unpruned_channels"]).to(device)
-    copy_weights_from_dict(core_model, unprune_meta_data[-1]["unpruned_weights"])
+    copy_weights_from_dict(core_model, unprune_meta_data[-1]["unpruned_weights"], BN_data[-1]["BN_params"], BN=True)
 
-    
 
-    fine_tuner_core(core_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_core_model_Level-{str(prune_steps+1)}", LR=lr)
+    fine_tuner(core_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_core_model_Level-{str(prune_steps+1)}", LR=lr)
     # fine_tuner_BN(core_model, train_loader, val_loader, num_epochs=epochs, num_epochs_BN=10, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_core_model_Level-{str(prune_steps+1)}", LR=lr)
-    # acc_pruned, f1_pruned, params_core, mac_core, size_mb_core, latency_core = evaluate(core_model, test_loader, profiling=True)
+    acc_pruned, f1_pruned, params_core, mac_core, size_mb_core, latency_core = evaluate(core_model, test_loader, profiling=True)
     # torch.onnx.export(core_model, (torch.randn(1, 3, 32, 32).to(device),), f=f"./saves/onnx/{model_name}_Core_Model.onnx")
     save_statedict(core_model, unprune_meta_data[-1]["num_unpruned_channels"], path=f"./saves/state_dicts/{exp_name}_{model_name}_Core_Model.pth")
-    # accuracy_list.append(acc_pruned)
-    # profiling["params"].append(params_core)
-    # profiling["MAC's"].append(mac_core)
-    # profiling["model_size"].append(size_mb_core)
-    # profiling["latency"].append(latency_core)
-    # model_summary_with_frozen_counts(core_model) 
+    accuracy_list.append(acc_pruned)
+    profiling["params"].append(params_core)
+    profiling["MAC's"].append(mac_core)
+    profiling["model_size"].append(size_mb_core)
+    profiling["latency"].append(latency_core)
+    model_summary_with_frozen_counts(core_model) 
 
     if rebuild:
 
@@ -293,26 +313,23 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
                 rebuilt_model = Resnet_General(new_channels).to(device)
             elif "VGG" in model_name:
                 rebuilt_model = VGG_General(new_channels).to(device)
-            get_core_weights(core_model, unprune_meta_data[i]["unpruned_weights"])
+            get_core_weights(core_model, unprune_meta_data[i]["unpruned_weights"], BN_data[i+1]["BN_params"], restore_BN=True)
             del core_model
 
             rebuilt_model, freeze_dim0, freeze_dim1 = reconstruct_Global_weights_from_dicts(rebuilt_model, pruned_indices=prune_meta_data[i]["zero_channels_info"], pruned_weights=prune_meta_data[i]["pruned_weights"], unpruned_indices=unprune_meta_data[i]["non_zero_channels_info"], unpruned_weights=unprune_meta_data[i]["unpruned_weights"])
-            rebuilt_model = freeze_grads(rebuilt_model, freeze_dim0, freeze_dim1)
-            # rebuilt_model = freeze_channels_2d(rebuilt_model, unprune_meta_data[i]["non_zero_channels_info"])
-            # check = validate_frozen_channels(rebuilt_model, unprune_meta_data[i]["non_zero_channels_info"])
-            # print(f"Channel Freezing applied correctly: {check}")
+            rebuilt_model = restore_BN_weights(rebuilt_model, BN_params=BN_data[i]["BN_params"], restore_indices=freeze_dim0, restore_params=BN_data[i+1]["BN_params"], update_weights=True)
             model_summary_with_frozen_counts(rebuilt_model)
             
-            fine_tuner_rebuilt(rebuilt_model, train_loader, val_loader, freeze_dim0, freeze_dim1, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=lr)
+            # fine_tuner(rebuilt_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=lr)
+            fine_tuner_zerograd(rebuilt_model, train_loader, val_loader, freeze_dim0, freeze_dim1, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=lr)
             # fine_tuner_BN(rebuilt_model, train_loader, val_loader, num_epochs=epochs, num_epochs_BN=10, optim_type=optim, scheduler_type=scheduler, 
             #               exp_name=f"{exp_name}_Training_model_Level-{i+1}", pruned_indices=prune_meta_data[i]["zero_channels_info"], unpruned_indices=unprune_meta_data[i]["non_zero_channels_info"], unpruned_weights=unprune_meta_data[i]["unpruned_weights"], LR=lr)
-            # check = validate_frozen_channels(rebuilt_model, unprune_meta_data[i]["non_zero_channels_info"])
-            # print(f"Channel Freezing applied correctly: {check}")
             acc_rebuilt, f1_rebuilt, params_rebuilt, mac_rebuilt, size_mb_rebuilt, latency_rebuilt = evaluate(rebuilt_model, test_loader, profiling=True)
             # torch.onnx.export(rebuilt_model, (torch.randn(1, 3, 32, 32).to(device),), f=f"./saves/onnx/{model_name}_Descendant_Model_Level-{i+1}.onnx")
             save_statedict(rebuilt_model, new_channels, path=f"./saves/state_dicts/{exp_name}_{model_name}_Descendant_Model_Level-{i+1}.pth")
             core_model = rebuilt_model
             del rebuilt_model
+            
             accuracy_list.append(acc_rebuilt)
             profiling["params"].append(params_rebuilt)
             profiling["MAC's"].append(mac_rebuilt)
@@ -333,8 +350,8 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
 
 def compare_weights():
     
-        path_core = "./saves/state_dicts/Exp_1_Replace_Iter_adaptivity_RESNET18_COSINE_0.001_20_Resnet18_Core_Model.pth"
-        path_level3 = "./saves/state_dicts/Exp_1_Replace_Iter_adaptivity_RESNET18_COSINE_0.001_20_Resnet18_Descendant_Model_Level-1.pth"
+        path_core = "./saves/state_dicts/Exp_1_Freeze_Type2_Iter_adaptivity_RESNET18_COSINE_0.001_20_Resnet18_Core_Model.pth"
+        path_level3 = "./saves/state_dicts/Exp_1_Freeze_Type2_Iter_adaptivity_RESNET18_COSINE_0.001_20_Resnet18_Descendant_Model_Level-3.pth"
 
 
         loaded_data_core = torch.load(path_core, map_location=device)
@@ -363,7 +380,7 @@ def compare_weights():
 
 if __name__ == '__main__':
 
-    # test_acc, profiling = iterative_filter_pruning(prune_steps=1, prune_ratio=[0.5], model_name="Resnet18", epochs=50, lr=1e-3, optim="adam", exp_name=f"Exp_KD_single_Iter_Adaptivity")
+    # compare_weights()
     # exit()
     
     # schedulers = ['cosine', 'step', 'exponential', 'cyclic', 'Default']
@@ -371,16 +388,16 @@ if __name__ == '__main__':
     # epochs = [20, 50, 100, 200]
     # model_name = ["Resnet18", "VGG16"]
 
-    # Experiment 1: Iterative Adaptivity with Resnet20
-    schedulers = ['cosine'] 
+    # Experiment 1: Iterative Adaptivity with Resnet18
+    schedulers = ['cosine', 'step', 'exponential', 'cyclic', 'Default']
     lrs = [1e-3]
-    epochs = [1]
-    model_name = ["Resnet18"]
+    epochs = [20]
+    model_name = ["Resnet18", "VGG16"]
     # alphas = [0, 0.25, 0.5]
 
     results = []
     trial = 0
-    EXP = "Freeze_Iter_adaptivity"
+    EXP = "Restore&Update_BN_Iter_adaptivity"
 
     for sch in schedulers:
         for lr in lrs:
@@ -390,7 +407,7 @@ if __name__ == '__main__':
                     
                     # test_acc, profiling = iterative_filter_pruning(scheduler=sch, model_name=model, epochs=epoch, lr=lr, alpha=alpha, optim="adam", exp_name=f"Exp_{trial+1}_{EXP}_{model.upper()}_{sch.upper()}_{str(lr)}_{str(epoch)}_{str(alpha)}", KD=True)
                     # test_acc, profiling = Global_iterative_filter_pruning(scheduler=sch, prune_steps=1, prune_ratio=[0.5], model_name=model, epochs=epoch, lr=lr, optim="SGD", exp_name=f"Exp_{trial+1}_{EXP}_{model.upper()}_{sch.upper()}_{str(lr)}_{str(epoch)}")
-                    test_acc, profiling = Global_iterative_filter_pruning(scheduler=sch, model_name=model, epochs=epoch, lr=lr, optim="adam", exp_name=f"Exp_{trial+1}_{EXP}_{model.upper()}_{sch.upper()}_{str(lr)}_{str(epoch)}")
+                    test_acc, profiling = Global_iterative_filter_pruning(scheduler=sch, model_name=model, epochs=epoch, lr=lr, exp_name=f"Exp_{trial+1}_{EXP}_{model.upper()}_{sch.upper()}_{str(lr)}_{str(epoch)}")
                     # test_acc, profiling = Global_iterative_filter_pruning(scheduler=sch, model_name=model, epochs=epoch, lr=lr, optim="SGD", exp_name=f"Exp_{trial+1}_{EXP}_{model.upper()}_{sch.upper()}_{str(lr)}_{str(epoch)}")
                     
                     results.append({

@@ -46,7 +46,7 @@ def print_pruned_weights(layer, pruned_indices, dim=0):
     print(f"Pruned Weights (dim={dim}) for indices {pruned_indices.tolist()}:\n", pruned_weights)
 
     
-def prune_resnet(model, amount=0.2):
+def prune_resnet_torch(model, amount=0.2):
     # Function to apply structural pruning
     for name, module in model.named_modules():
         if isinstance(module, nn.Conv2d):
@@ -125,7 +125,6 @@ class ChannelPruning(prune.BasePruningMethod):
             dim=dim,
             importance_scores=importance_scores,
         )
-
 
 
 def prune_bias(layer, indices):
@@ -218,7 +217,7 @@ class SimpleCNN(nn.Module):
         return x
 
 
-def Index_Aware_pruner(model, amount, prune_step=0, res_blocks=3, plot=True):
+def Index_Aware_pruner(model, amount, prune_step=0, res_blocks=3, plot=True, BN=True):
     
     pruning_index = {}
     count = 0
@@ -268,6 +267,37 @@ def Index_Aware_pruner(model, amount, prune_step=0, res_blocks=3, plot=True):
     
     return model, pruning_index        
         
+
+def prune_batchnorm(model, unpruned_indices):
+    """
+    Prune the BatchNorm layers based on provided indices.
+
+    Args:
+        model (torch.nn.Module): The PyTorch model (ResNet18 or any CNN).
+        bn_prune_indices (dict): A dictionary where keys are BN layer names 
+                                 and values are lists of channel indices to be restored.
+
+    Returns:
+        model (torch.nn.Module): The list with unpruned BN indices and weights.
+    """
+
+    bn_indices = {}
+    bn_weights = {}
+
+    dict_iter = iter(unpruned_indices.items())
+
+    for name, layer in model.named_modules():
+        if isinstance(layer, nn.BatchNorm2d):
+            indices_to_keep = next(dict_iter)[1].get("unpruned_dim0", [])
+            bn_indices[name] = indices_to_keep
+
+            # Extract and update only the remaining channels
+            bn_weights[name+"_weights"] = layer.weight.data[indices_to_keep]
+            bn_weights[name+"_bias"] = layer.bias.data[indices_to_keep]
+            bn_weights[name+"_runnin_mean"] = layer.running_mean[indices_to_keep]
+            bn_weights[name+"_running_var"] = layer.running_var[indices_to_keep]
+
+    return bn_indices, bn_weights
         
 def get_nonzero_indices(model):
     non_zero_indices = {}
@@ -313,17 +343,25 @@ def copy_weights(pruned_model, rebuilt_model, nonzero_channels):
                         n += 1
      
                 
-def copy_weights_from_dict(pruned_model, unpruned_weights):
+def copy_weights_from_dict(pruned_model, unpruned_weights, BN_params, BN=False):
     for name, module in pruned_model.named_modules():
         if isinstance(module, nn.Conv2d):
             module.weight.data = unpruned_weights[name]
+
+    if BN:
+        for name, module in pruned_model.named_modules():
+            if isinstance(module, nn.BatchNorm2d):
+                module.weight.data = BN_params[name+"_weights"]
+                module.bias.data = BN_params[name+"_bias"]
+                module.running_mean = BN_params[name+"_runnin_mean"]
+                module.running_var = BN_params[name+"_running_var"]
+
 
 
 def rebuilt_bigger(channel_dict_path, state_dict_path, device):
     
     with open(channel_dict_path, "rb") as f:
         channel_dict = pickle.load(f)
-    
     
     model = Resnet_General(channel_dict)
     model.load_state_dict(torch.load(state_dict_path, map_location=device, weights_only=True))
@@ -491,10 +529,19 @@ def get_rebuild_channels(unpruned_channels, pruned_channels):
     return new_channels_dict
 
 
-def get_core_weights(pruned_model, unpruned_weights):
+def get_core_weights(pruned_model, unpruned_weights, BN_params, restore_BN=False):
     for name, module in pruned_model.named_modules():
         if isinstance(module, nn.Conv2d):
             unpruned_weights[name] = module.weight.data
+
+        if restore_BN:
+            if isinstance(module, nn.BatchNorm2d):
+                BN_params[name+"_weights"] = module.weight.data
+                BN_params[name+"_bias"] = module.bias.data
+                BN_params[name+"_runnin_mean"] = module.running_mean
+                BN_params[name+"_running_var"] = module.running_var
+
+
 
 
 # Function to replace weights from Lower model to Higher model
@@ -523,6 +570,28 @@ def replace_previous_weights(model, pruned_indices, unpruned_indices, unpruned_w
 
     return model
 
+def restore_BN_weights(model, BN_params, restore_indices, restore_params, update_weights=False):
+
+    dict_iter = iter(restore_indices.items())
+    for name, layer in model.named_modules():
+        if isinstance(layer, nn.BatchNorm2d):
+            layer.weight.data = BN_params[name+"_weights"]
+            layer.bias.data = BN_params[name+"_bias"]
+            layer.running_mean = BN_params[name+"_runnin_mean"]
+            layer.running_var = BN_params[name+"_running_var"]
+
+            # Update the BN params after Fine-Tuning
+            if update_weights:
+                indices_to_replace = next(dict_iter)[1]
+
+                layer.weight.data[indices_to_replace] = restore_params[name+"_weights"]
+                layer.bias.data[indices_to_replace] = restore_params[name+"_bias"]
+                layer.running_mean[indices_to_replace] = restore_params[name+"_runnin_mean"]
+                layer.running_var[indices_to_replace] = restore_params[name+"_running_var"]
+            # check_overlap(layer.weight.data, restore_params[name+"_weights"])
+
+    return model
+
 
 def reconstruct_Global_weights_from_dicts(model, pruned_indices, pruned_weights, unpruned_indices, unpruned_weights, freezing=False):
     """
@@ -538,6 +607,8 @@ def reconstruct_Global_weights_from_dicts(model, pruned_indices, pruned_weights,
     Returns:
     - reconstructed_model: torch.nn.Module, the model with reconstructed weights.
     """
+    new_unpruned_dim0_freeze_list = {}
+    new_unpruned_dim1_freeze_list = {}
     # Iterate through the model's state_dict to dynamically fetch layer shapes
     for name, layer in model.named_modules():
         if isinstance(layer, nn.Conv2d):
@@ -580,6 +651,9 @@ def reconstruct_Global_weights_from_dicts(model, pruned_indices, pruned_weights,
             new_pruned_dim1 = [combined_dim1.index(x) for x in pruned_dim1]
             new_unpruned_dim1 = [combined_dim1.index(x) for x in unpruned_dim1]
 
+            new_unpruned_dim0_freeze_list[name] = new_unpruned_dim0
+            new_unpruned_dim1_freeze_list[name] = new_unpruned_dim1
+
             # Assign pruned weights
             for i in range(len(new_pruned_dim0)):
                     out_idx = new_pruned_dim0[i]  # Output channel index
@@ -609,8 +683,9 @@ def reconstruct_Global_weights_from_dicts(model, pruned_indices, pruned_weights,
                             layer.weight.data[out_idx, in_idx, :, :].requires_grad = False
 
                 print(name, layer.weight.requires_grad)
+                
+    return model, new_unpruned_dim0_freeze_list, new_unpruned_dim1_freeze_list
 
-    return model, new_unpruned_dim0, new_unpruned_dim1
 
 def reconstruct_weights_from_dicts(model, pruned_indices, pruned_weights, unpruned_indices, unpruned_weights):
     """
@@ -666,9 +741,6 @@ def reconstruct_weights_from_dicts(model, pruned_indices, pruned_weights, unprun
     return model
                        
 
-def get_batchnorm():
-    pass
-
 # Function to create masks for each parameter
 def create_mask(param, dim0_indices, dim1_indices):
     mask = torch.ones_like(param, dtype=torch.bool)  # Initialize all False
@@ -690,7 +762,7 @@ def freeze_grads(model, new_unpruned_dim0, new_unpruned_dim1):
         if isinstance(layer, nn.Conv2d):
 
             # Create and store masks for each parameter
-            mask = create_mask(layer.weight, new_unpruned_dim0, new_unpruned_dim1)
+            mask = create_mask(layer.weight, new_unpruned_dim0[name], new_unpruned_dim1[name])
 
             # Register hooks for each parameter
             layer.weight.register_hook(lambda grad, mask=mask: mask_gradients(grad, mask))
@@ -702,8 +774,8 @@ def zero_out_gradients(model, dim0_indices, dim1_indices):
     for name, layer in model.named_modules():
         if isinstance(layer, nn.Conv2d):
             if layer.weight.grad is not None:
-                for i in dim0_indices:
-                    for j in dim1_indices:
+                for i in dim0_indices[name]:
+                    for j in dim1_indices[name]:
                         if i <= layer.weight.shape[0] and j <= layer.weight.shape[1]:  # Ensure indices are in range
                             layer.weight.grad[i, j, :, :] = 0  # Zero out specific gradient indices
 

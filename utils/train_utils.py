@@ -218,7 +218,7 @@ def save_statedict(model, channel_dict, path="./saves/state_dicts"):
 
 
 
-def fine_tuner_core(model, train_loader, val_loader, num_epochs, optim_type, scheduler_type, exp_name, device=device, LR=1e-3):
+def fine_tuner(model, train_loader, val_loader, num_epochs, optim_type, scheduler_type, exp_name, device=device, LR=1e-3):
 
     model = model.to(device)
 
@@ -319,7 +319,7 @@ def fine_tuner_core(model, train_loader, val_loader, num_epochs, optim_type, sch
     print("Fine-Tuning Complete")        
 
 
-def fine_tuner_rebuilt(model, train_loader, val_loader, freeze_dim0, freeze_dim1, num_epochs, optim_type, scheduler_type, exp_name, device=device, LR=1e-3):
+def fine_tuner_zerograd(model, train_loader, val_loader, freeze_dim0, freeze_dim1, num_epochs, optim_type, scheduler_type, exp_name, device=device, LR=1e-3):
 
     model = model.to(device)
 
@@ -421,7 +421,7 @@ def fine_tuner_rebuilt(model, train_loader, val_loader, freeze_dim0, freeze_dim1
     print("Fine-Tuning Complete")        
 
 
-def fine_tuner_BN(model, train_loader, val_loader, num_epochs, num_epochs_BN, optim_type, scheduler_type, exp_name, pruned_indices, unpruned_indices, unpruned_weights, device=device, LR=1e-3):
+def fine_tuner_BN(model, train_loader, val_loader, num_epochs, num_epochs_BN, optim_type, scheduler_type, exp_name, pruned_indices, unpruned_indices, unpruned_weights, device=device, LR=1e-3, replace_core=False):
 
     model = model.to(device)
 
@@ -456,7 +456,8 @@ def fine_tuner_BN(model, train_loader, val_loader, num_epochs, num_epochs_BN, op
     for epoch in range(num_epochs+num_epochs_BN):
 
         if epoch == num_epochs:
-            model = replace_previous_weights(model, pruned_indices, unpruned_indices, unpruned_weights)
+            if replace_core:
+                model = replace_previous_weights(model, pruned_indices, unpruned_indices, unpruned_weights)
             for name, layer in model.named_modules():
                 if isinstance(layer, nn.Conv2d):
                     layer.weight.requires_grad = False # Only Freeze Conv2D layers
