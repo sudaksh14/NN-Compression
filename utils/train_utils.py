@@ -11,7 +11,7 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 from utils.visualize_utils import plot_curves_with_val, plot_KD_metrics
 from tqdm import tqdm
-from utils.prune_utils import replace_previous_weights, zero_out_gradients
+from utils.prune_utils import replace_previous_weights, zero_out_gradients_v2
 
 # Set device for training and evaluation
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -365,7 +365,7 @@ def fine_tuner_zerograd(model, train_loader, val_loader, freeze_dim0, freeze_dim
             loss = criterion(outputs, labels)
             
             loss.backward()
-            zero_out_gradients(model, freeze_dim0, freeze_dim1)
+            zero_out_gradients_v2(model, freeze_dim0, freeze_dim1)
             optimizer.step()
             
             train_loss += loss.item() * inputs.size(0)

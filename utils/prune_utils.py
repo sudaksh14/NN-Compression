@@ -705,7 +705,7 @@ def reconstruct_weights_from_dicts(model, pruned_indices, pruned_weights, unprun
             
     return model
                        
-
+"""
 # Function to create masks for each parameter
 def create_mask(param, dim0_indices, dim1_indices):
     mask = torch.ones_like(param, dtype=torch.bool)  # Initialize all False
@@ -734,18 +734,40 @@ def freeze_grads(model, new_unpruned_dim0, new_unpruned_dim1):
             layer.weight.register_hook(lambda grad, mask=mask: mask_gradients(grad, mask))
 
     return model
+"""
 
 # Approach2: Converts gradients to zero in each training epoch
-def zero_out_gradients(model, dim0_indices, dim1_indices):
+def zero_out_gradients_v1(model, dim0_indices, dim1_indices):
+    with torch.no_grad():
+        for name, layer in model.named_modules():
+            if isinstance(layer, nn.Conv2d):
+                if layer.weight.grad is not None:
+                    for i in dim0_indices[name]:
+                        for j in dim1_indices[name]:
+                            if i <= layer.weight.shape[0] and j <= layer.weight.shape[1]:  # Ensure indices are in range
+                                layer.weight.grad[i, j, :, :] = 0  # Zero out specific gradient indices
+
+
+# More efficient in use of memory
+def zero_out_gradients_v2(model, dim0_indices, dim1_indices):
     for name, layer in model.named_modules():
-        if isinstance(layer, nn.Conv2d):
-            if layer.weight.grad is not None:
-                for i in dim0_indices[name]:
-                    for j in dim1_indices[name]:
-                        if i <= layer.weight.shape[0] and j <= layer.weight.shape[1]:  # Ensure indices are in range
-                            layer.weight.grad[i, j, :, :] = 0  # Zero out specific gradient indices
+        if isinstance(layer, nn.Conv2d) and layer.weight.grad is not None:
+            dim0_idx = torch.tensor(dim0_indices[name], dtype=torch.long, device=layer.weight.grad.device)
+            dim1_idx = torch.tensor(dim1_indices[name], dtype=torch.long, device=layer.weight.grad.device)
+
+            # Ensure indices are within valid range
+            dim0_idx = dim0_idx[dim0_idx < layer.weight.grad.shape[0]]
+            dim1_idx = dim1_idx[dim1_idx < layer.weight.grad.shape[1]]
+
+            # Create a grid of (dim0, dim1) combinations
+            grid_dim0, grid_dim1 = torch.meshgrid(dim0_idx, dim1_idx, indexing='ij')
+
+            # Zero out gradients at specified indices
+            with torch.no_grad():
+                layer.weight.grad[grid_dim0, grid_dim1, :, :] = 0
 
 
+# NOT IN USE
 def freeze_channels_2d(model, channel_indices):
     """
     Freezes specific channels in both `dim 0` (output channels) and `dim 1` (input channels) for the specified layers.
@@ -789,7 +811,7 @@ def freeze_channels_2d(model, channel_indices):
 
     return model
 
-
+# NOT IN USE
 def validate_frozen_channels(model, channel_indices):
     """
     Validate that the specified channels in the model are frozen.

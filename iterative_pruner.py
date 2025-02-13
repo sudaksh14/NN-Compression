@@ -21,6 +21,7 @@ import onnx
 import pandas as pd
 import random
 from copy import deepcopy
+from openpyxl import load_workbook
 
 
 
@@ -350,8 +351,8 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
 
 def compare_weights():
     
-        path_core = "./saves/state_dicts/Exp_1_Freeze_Type2_Iter_adaptivity_RESNET18_COSINE_0.001_20_Resnet18_Core_Model.pth"
-        path_level3 = "./saves/state_dicts/Exp_1_Freeze_Type2_Iter_adaptivity_RESNET18_COSINE_0.001_20_Resnet18_Descendant_Model_Level-3.pth"
+        path_core = "./saves/state_dicts/Exp_1_ToyExp_Iter_adaptivity_VGG16_COSINE_0.001_2_VGG16_Core_Model.pth"
+        path_level3 = "./saves/state_dicts/Exp_1_ToyExp_Iter_adaptivity_VGG16_COSINE_0.001_2_VGG16_Descendant_Model_Level-3.pth"
 
 
         loaded_data_core = torch.load(path_core, map_location=device)
@@ -359,23 +360,28 @@ def compare_weights():
 
         state_dict_core = loaded_data_core["state_dict"]
         channel_dict_core = loaded_data_core["metadata"]
-        model_core = Resnet_General(channel_dict_core).to(device)
+        # model_core = Resnet_General(channel_dict_core).to(device)
+        model_core = VGG_General(channel_dict_core).to(device)
         model_core.load_state_dict(state_dict_core)
 
         state_dict_level3 = loaded_data_level3["state_dict"]
         channel_dict_level3 = loaded_data_level3["metadata"]      
-        model_level3 = Resnet_General(channel_dict_level3).to(device)
+        # model_level3 = Resnet_General(channel_dict_level3).to(device)
+        model_level3 = VGG_General(channel_dict_level3).to(device)
         model_level3.load_state_dict(state_dict_level3)
 
         model_core.eval()
         model_level3.eval()
 
-        layer_name = 'conv1'
+        for name, layer in model_core.named_modules():
+            if isinstance(layer, nn.Conv2d):
+                layer_name = name
+                print(f"Checking overlap for layer: {layer_name}")
 
-        layer_core = dict(model_core.named_modules()).get(layer_name)
-        layer_level3 = dict(model_level3.named_modules()).get(layer_name)
+                layer_core = dict(model_core.named_modules()).get(layer_name)
+                layer_level3 = dict(model_level3.named_modules()).get(layer_name)
 
-        check_overlap(layer_level3.weight.data, layer_core.weight.data)
+                check_overlap(layer_level3.weight.data, layer_core.weight.data)
   
 
 if __name__ == '__main__':
@@ -392,7 +398,7 @@ if __name__ == '__main__':
     schedulers = ['cosine', 'step', 'exponential', 'cyclic', 'Default']
     lrs = [1e-3]
     epochs = [20]
-    model_name = ["Resnet18", "VGG16"]
+    model_name = ["Resnet18"]
     # alphas = [0, 0.25, 0.5]
 
     results = []
@@ -425,7 +431,11 @@ if __name__ == '__main__':
                             })
                     
                     results_df = pd.DataFrame(results)
-                    results_df.to_excel(f"./saves/Results/Exp_{EXP}_{model.upper()}_results.xlsx")
+                    result_path = f"./saves/Results/Exp_{EXP}_{model.upper()}_results.csv"
+                    if os.path.exists(result_path):
+                        results_df.to_csv(result_path, mode='a', header=False, index=False)
+                    else:
+                        results_df.to_csv(result_path, index=False)
                     trial += 1
     
     print(f"{"-"*20}EXPERIMENT FINISHED{"-"*20}")
