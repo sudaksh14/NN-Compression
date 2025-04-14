@@ -46,8 +46,8 @@ if Data_Augmentation:
         transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010])
     ])
     
-    full_dataset = datasets.CIFAR10(root='./data/Cifar-10', train=True, download=False, transform=train_transform)
-    test_dataset = datasets.CIFAR10(root='./data/Cifar-10', train=False, download=False, transform=test_transform)
+    full_dataset = datasets.CIFAR10(root='./data/Cifar-10', train=True, download=True, transform=train_transform)
+    test_dataset = datasets.CIFAR10(root='./data/Cifar-10', train=False, download=True, transform=test_transform)
     
     
 else:
@@ -56,8 +56,8 @@ else:
         transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010])
     ])
     
-    full_dataset = datasets.CIFAR10(root='./data/Cifar-10', train=True, download=False, transform=transform)
-    test_dataset = datasets.CIFAR10(root='./data/Cifar-10', train=False, download=False, transform=transform)
+    full_dataset = datasets.CIFAR10(root='./data/Cifar-10', train=True, download=True, transform=transform)
+    test_dataset = datasets.CIFAR10(root='./data/Cifar-10', train=False, download=True, transform=transform)
 
 
 # Load CIFAR-10 datasets
