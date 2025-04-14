@@ -98,7 +98,7 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
     accuracy_list = []
     profiling = {"params":[], "MAC's":[], "model_size":[], "latency":[]}
     
-    print(f"{"-"*20}Starting with Experiment {exp_name}{"-"*20}")
+    print(f"{'-'*20}Starting with Experiment {exp_name}{'-'*20}")
     acc_original, f1_original, params_original, mac_original, size_mb_original, latency_original = evaluate(original_model, test_loader, profiling=True, KD=False)
     accuracy_list.append(acc_original)
     profiling["params"].append(params_original)
@@ -169,7 +169,7 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
     if rebuild:
 
         for i in range(prune_steps-1, -1, -1):
-            print(f"{"-"*20}Rebuilding Descendant Model Level-{i+1}{"-"*20}")
+            print(f"{'-'*20}Rebuilding Descendant Model Level-{i+1}{'-'*20}")
             new_channels = get_rebuild_channels(unprune_meta_data[i]["num_unpruned_channels"], prune_meta_data[i]["num_pruned_channels"])
             if "Resnet" in model_name:
                 rebuilt_model = Resnet_General(new_channels).to(device)
@@ -224,7 +224,7 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
     accuracy_list = []
     profiling = {"params":[], "MAC's":[], "model_size":[], "latency":[]}
     
-    print(f"{"-"*20}Starting with Experiment {exp_name}{"-"*20}")
+    print(f"{'-'*20}Starting with Experiment {exp_name}{'-'*20}")
     acc_original, f1_original, params_original, mac_original, size_mb_original, latency_original = evaluate(original_model, test_loader, profiling=True)
     accuracy_list.append(acc_original)
     profiling["params"].append(params_original)
@@ -308,7 +308,7 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
     if rebuild:
 
         for i in range(prune_steps-1, -1, -1):
-            print(f"{"-"*20}Rebuilding Descendant Model Level-{i+1}{"-"*20}")
+            print(f"{'-'*20}Rebuilding Descendant Model Level-{i+1}{'-'*20}")
             new_channels = get_rebuild_channels(unprune_meta_data[i]["num_unpruned_channels"], prune_meta_data[i]["num_pruned_channels"])
             if "Resnet" in model_name:
                 rebuilt_model = Resnet_General(new_channels).to(device)
@@ -438,5 +438,5 @@ if __name__ == '__main__':
                         results_df.to_csv(result_path, index=False)
                     trial += 1
     
-    print(f"{"-"*20}EXPERIMENT FINISHED{"-"*20}")
+    print(f"{'-'*20}EXPERIMENT FINISHED{'-'*20}")
     exit()
