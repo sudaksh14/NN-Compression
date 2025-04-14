@@ -98,7 +98,7 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
     accuracy_list = []
     profiling = {"params":[], "MAC's":[], "model_size":[], "latency":[]}
     
-    print(f"{"-"*20}Starting with Experiment {exp_name}{"-"*20}")
+    # print(f"{"-"*20}Starting with Experiment {exp_name}{"-"*20}")
     acc_original, f1_original, params_original, mac_original, size_mb_original, latency_original = evaluate(original_model, test_loader, profiling=True, KD=False)
     accuracy_list.append(acc_original)
     profiling["params"].append(params_original)
@@ -169,7 +169,7 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
     if rebuild:
 
         for i in range(prune_steps-1, -1, -1):
-            print(f"{"-"*20}Rebuilding Descendant Model Level-{i+1}{"-"*20}")
+            # print(f"{"-"*20}Rebuilding Descendant Model Level-{i+1}{"-"*20}")
             new_channels = get_rebuild_channels(unprune_meta_data[i]["num_unpruned_channels"], prune_meta_data[i]["num_pruned_channels"])
             if "Resnet" in model_name:
                 rebuilt_model = Resnet_General(new_channels).to(device)
@@ -224,13 +224,13 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
     accuracy_list = []
     profiling = {"params":[], "MAC's":[], "model_size":[], "latency":[]}
     
-    print(f"{"-"*20}Starting with Experiment {exp_name}{"-"*20}")
-    acc_original, f1_original, params_original, mac_original, size_mb_original, latency_original = evaluate(original_model, test_loader, profiling=True)
-    accuracy_list.append(acc_original)
-    profiling["params"].append(params_original)
-    profiling["MAC's"].append(mac_original)
-    profiling["model_size"].append(size_mb_original)
-    profiling["latency"].append(latency_original)
+    # print(f"{"-"*20} Starting with Experiment {exp_name}{"-"*20}")
+    # acc_original, f1_original, params_original, mac_original, size_mb_original, latency_original = evaluate(original_model, test_loader, profiling=True)
+    # accuracy_list.append(acc_original)
+    # profiling["params"].append(params_original)
+    # profiling["MAC's"].append(mac_original)
+    # profiling["model_size"].append(size_mb_original)
+    # profiling["latency"].append(latency_original)
                        
     prune_meta_data = []
     unprune_meta_data = []
@@ -293,22 +293,22 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
     copy_weights_from_dict(core_model, unprune_meta_data[-1]["unpruned_weights"], BN_data[-1]["BN_params"], BN=True)
 
 
-    fine_tuner(core_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_core_model_Level-{str(prune_steps+1)}", LR=lr)
+    # fine_tuner(core_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_core_model_Level-{str(prune_steps+1)}", LR=lr)
     # fine_tuner_BN(core_model, train_loader, val_loader, num_epochs=epochs, num_epochs_BN=10, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_core_model_Level-{str(prune_steps+1)}", LR=lr)
-    acc_pruned, f1_pruned, params_core, mac_core, size_mb_core, latency_core = evaluate(core_model, test_loader, profiling=True)
+    # acc_pruned, f1_pruned, params_core, mac_core, size_mb_core, latency_core = evaluate(core_model, test_loader, profiling=True)
     # torch.onnx.export(core_model, (torch.randn(1, 3, 32, 32).to(device),), f=f"./saves/onnx/{model_name}_Core_Model.onnx")
     save_statedict(core_model, unprune_meta_data[-1]["num_unpruned_channels"], path=f"./saves/state_dicts/{exp_name}_{model_name}_Core_Model.pth")
-    accuracy_list.append(acc_pruned)
-    profiling["params"].append(params_core)
-    profiling["MAC's"].append(mac_core)
-    profiling["model_size"].append(size_mb_core)
-    profiling["latency"].append(latency_core)
+    # accuracy_list.append(acc_pruned)
+    # profiling["params"].append(params_core)
+    # profiling["MAC's"].append(mac_core)
+    # profiling["model_size"].append(size_mb_core)
+    # profiling["latency"].append(latency_core)
     model_summary_with_frozen_counts(core_model) 
 
     if rebuild:
 
         for i in range(prune_steps-1, -1, -1):
-            print(f"{"-"*20}Rebuilding Descendant Model Level-{i+1}{"-"*20}")
+            # print(f"{"-"*20}Rebuilding Descendant Model Level-{i+1}{"-"*20}")
             new_channels = get_rebuild_channels(unprune_meta_data[i]["num_unpruned_channels"], prune_meta_data[i]["num_pruned_channels"])
             if "Resnet" in model_name:
                 rebuilt_model = Resnet_General(new_channels).to(device)
@@ -320,9 +320,46 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
             rebuilt_model, freeze_dim0, freeze_dim1 = reconstruct_Global_weights_from_dicts(rebuilt_model, pruned_indices=prune_meta_data[i]["zero_channels_info"], pruned_weights=prune_meta_data[i]["pruned_weights"], unpruned_indices=unprune_meta_data[i]["non_zero_channels_info"], unpruned_weights=unprune_meta_data[i]["unpruned_weights"])
             rebuilt_model = restore_BN_weights(rebuilt_model, BN_params=BN_data[i]["BN_params"], restore_indices=freeze_dim0, restore_params=BN_data[i+1]["BN_params"], update_weights=True)
             model_summary_with_frozen_counts(rebuilt_model)
-            
+
+
+            for name, layer in rebuilt_model.named_modules():
+                if name == 'layer1.0.conv1':
+                    grad_dim0 = torch.tensor(freeze_dim0[name], dtype=torch.long, device=device)
+                    grad_dim1 = torch.tensor(freeze_dim1[name], dtype=torch.long, device=device)
+                    t1 = layer.weight[grad_dim0[:, None], grad_dim1]
+                    print(t1.shape)
+                    # print(t1)
+
+                    t2 = torch.tensor(unprune_meta_data[i]["unpruned_weights"][name], device=device)
+                    print(t2.shape)
+                    # print(t2)
+                    
+                    print(t1==t2)
+                    overlap = torch.isin(t1, t2)
+                    print(t1[overlap].shape)
+
             # fine_tuner(rebuilt_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=lr)
             fine_tuner_zerograd(rebuilt_model, train_loader, val_loader, freeze_dim0, freeze_dim1, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=lr)
+            
+            for name, layer in rebuilt_model.named_modules():
+                if name == 'layer1.0.conv1':
+                    grad_dim0 = torch.tensor(freeze_dim0[name], dtype=torch.long, device=device)
+                    grad_dim1 = torch.tensor(freeze_dim1[name], dtype=torch.long, device=device)
+                    t1 = layer.weight[grad_dim0[:, None], grad_dim1]
+                    print(t1.shape)
+                    # print(t1)
+
+                    t2 = torch.tensor(unprune_meta_data[i]["unpruned_weights"][name], device=device)
+                    print(t2.shape)
+                    # print(t2)
+                    
+                    print(t1==t2)
+                    overlap = torch.isin(t1, t2)
+                    print(t1[overlap].shape)
+
+            exit()
+            
+
             # fine_tuner_BN(rebuilt_model, train_loader, val_loader, num_epochs=epochs, num_epochs_BN=10, optim_type=optim, scheduler_type=scheduler, 
             #               exp_name=f"{exp_name}_Training_model_Level-{i+1}", pruned_indices=prune_meta_data[i]["zero_channels_info"], unpruned_indices=unprune_meta_data[i]["non_zero_channels_info"], unpruned_weights=unprune_meta_data[i]["unpruned_weights"], LR=lr)
             acc_rebuilt, f1_rebuilt, params_rebuilt, mac_rebuilt, size_mb_rebuilt, latency_rebuilt = evaluate(rebuilt_model, test_loader, profiling=True)
@@ -351,8 +388,8 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
 
 def compare_weights():
     
-        path_core = "./saves/state_dicts/Exp_1_ToyExp_Iter_adaptivity_VGG16_COSINE_0.001_2_VGG16_Core_Model.pth"
-        path_level3 = "./saves/state_dicts/Exp_1_ToyExp_Iter_adaptivity_VGG16_COSINE_0.001_2_VGG16_Descendant_Model_Level-3.pth"
+        path_core = "./saves/state_dicts/Exp_5_Restore&Update_BN_Iter_adaptivity_RESNET18_DEFAULT_0.001_20_Resnet18_Core_Model.pth"
+        path_level3 = "./saves/state_dicts/Exp_5_Restore&Update_BN_Iter_adaptivity_RESNET18_DEFAULT_0.001_20_Resnet18_Descendant_Model_Level-3.pth"
 
 
         loaded_data_core = torch.load(path_core, map_location=device)
@@ -360,14 +397,14 @@ def compare_weights():
 
         state_dict_core = loaded_data_core["state_dict"]
         channel_dict_core = loaded_data_core["metadata"]
-        # model_core = Resnet_General(channel_dict_core).to(device)
-        model_core = VGG_General(channel_dict_core).to(device)
+        model_core = Resnet_General(channel_dict_core).to(device)
+        # model_core = VGG_General(channel_dict_core).to(device)
         model_core.load_state_dict(state_dict_core)
 
         state_dict_level3 = loaded_data_level3["state_dict"]
         channel_dict_level3 = loaded_data_level3["metadata"]      
-        # model_level3 = Resnet_General(channel_dict_level3).to(device)
-        model_level3 = VGG_General(channel_dict_level3).to(device)
+        model_level3 = Resnet_General(channel_dict_level3).to(device)
+        # model_level3 = VGG_General(channel_dict_level3).to(device)
         model_level3.load_state_dict(state_dict_level3)
 
         model_core.eval()
@@ -395,15 +432,15 @@ if __name__ == '__main__':
     # model_name = ["Resnet18", "VGG16"]
 
     # Experiment 1: Iterative Adaptivity with Resnet18
-    schedulers = ['cosine', 'step', 'exponential', 'cyclic', 'Default']
+    schedulers = ['Default']
     lrs = [1e-3]
-    epochs = [20]
+    epochs = [1]
     model_name = ["Resnet18"]
     # alphas = [0, 0.25, 0.5]
 
     results = []
     trial = 0
-    EXP = "Restore&Update_BN_Iter_adaptivity"
+    EXP = "Toy_Exp"
 
     for sch in schedulers:
         for lr in lrs:
@@ -431,12 +468,8 @@ if __name__ == '__main__':
                             })
                     
                     results_df = pd.DataFrame(results)
-                    result_path = f"./saves/Results/Exp_{EXP}_{model.upper()}_results.csv"
-                    if os.path.exists(result_path):
-                        results_df.to_csv(result_path, mode='a', header=False, index=False)
-                    else:
-                        results_df.to_csv(result_path, index=False)
+                    results_df.to_excel(f"./saves/Results/Exp_{EXP}_{model.upper()}_results.xlsx")
                     trial += 1
     
-    print(f"{"-"*20}EXPERIMENT FINISHED{"-"*20}")
+    # print(f"{"-"*20}EXPERIMENT FINISHED{"-"*20}")
     exit()

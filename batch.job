@@ -1,23 +1,31 @@
 #!/bin/bash
 #SBATCH -t 165:00:00
-#SBATCH -N 1
-#SBATCH -n 12
+#SBATCH --ntasks=1
+#SBATCH --nodes=1
+#SBATCH --job-name=simple
+#SBATCH --partition=all
 #SBATCH --gres=gpu:1
-#SBATCH --mem=30G
-#SBATCH -p all
+#SBATCH --mem=128G
+#SBATCH --cpus-per-task=32
 #SBATCH --output=./outputs/slurm_output_%A.out
 #SBATCH --exclude=ivi-cn005,ivi-cn009,ivi-cn010,ivi-cn011,ivi-cn012,ivi-cn001
 
-conda activate new_env
-echo "hello world"
+echo "TX Adaptivity Experiments"
 echo | date
-echo "Structural Pruning Experiments"
+echo "Node name: $(hostname)"
+echo -n memory=; ulimit -m
+echo -n nproc=; nproc
+
 nvidia-smi
+
+# Initialize Conda and activate environment
+eval "$(conda shell.bash hook)"
+conda activate prune_llm
 
 # python3 eval.py
 # python3 adaptivity.py
 # python3 Parallel_Block_model.py
-python3 iterative_pruner.py
+srun python iterative_pruner.py
 
 echo "Job Complete"
 echo | date

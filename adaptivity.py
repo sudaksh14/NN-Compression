@@ -77,7 +77,7 @@ def adaptivity_CNN(original_model, scheduler, prune_ratio=0.5, exp_name="ToyExp_
     core_model = Resnet_General(num_unpruned_channels).to(device)
     copy_weights_from_dict(core_model, unpruned_weights)
 
-    fine_tuner(core_model, train_loader, val_loader, num_epochs=200, scheduler_type=scheduler, prune_ratio=0.5, exp_name=f"{exp_name}_Training_core_model", LR=1e-2)
+    # fine_tuner(core_model, train_loader, val_loader, num_epochs=200, scheduler_type=scheduler, prune_ratio=0.5, exp_name=f"{exp_name}_Training_core_model", LR=1e-2)
     acc_pruned, f1_pruned, params_pruned, mac_pruned, size_mb_pruned = evaluate(core_model, test_loader, profiling=True)
     print("DONE PRUNING")
 
