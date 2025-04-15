@@ -37,9 +37,9 @@ class BottleneckBlock(nn.Module):
         self.conv3 = nn.Conv2d(mid_planes, out_planes, kernel_size=1, bias=False)
         self.bn3 = nn.BatchNorm2d(out_planes)
 
-        self.shortcut = nn.Sequential()
+        self.downsample = nn.Sequential()
         if stride != 1 or in_planes != out_planes:
-            self.shortcut = nn.Sequential(
+            self.downsample = nn.Sequential(
                 nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False),
                 nn.BatchNorm2d(out_planes)
             )
@@ -48,7 +48,7 @@ class BottleneckBlock(nn.Module):
         out = F.relu(self.bn1(self.conv1(x)))
         out = F.relu(self.bn2(self.conv2(out)))
         out = self.bn3(self.conv3(out))
-        out += self.shortcut(x)
+        out += self.downsample(x)
         return F.relu(out)
 
 
