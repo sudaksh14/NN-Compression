@@ -62,8 +62,8 @@ def evaluate(model, data_loader, plot_title="Test Accuracy & F1-Score", device=d
         plt.savefig(f"./plots/{plot_title}")
         
     if profiling:
-        params, mac, size_mb, latency = profile_model(model, (1,3,32,32))
-        return accuracy, f1, params, mac, size_mb, latency
+        params, mac, size_mb = profile_model(model, (1,3,32,32))
+        return accuracy, f1, params, mac, size_mb
         
     return accuracy, f1
 
@@ -86,11 +86,11 @@ def model_size_in_mb(model):
 def profile_model(model, input_size):
     # macs, params = compute_flops_and_macs(model, input_size)
     # flops, macs, params = get_model_profile(model=model, input_shape=input_size, print_profile=True, as_string=False)
-    flops, macs, params, latency = get_model_profile(model=model, input_shape=input_size, print_profile=True, as_string=False)
+    flops, macs, params = get_model_profile(model=model, input_shape=input_size, print_profile=True, as_string=False)
     size_mb = model_size_in_mb(model)
 
-    print(f"Params: {params / 1e6:.3f} M, MACs: {macs / 1e9:.3f} GMACs, FLOPs: {flops / 1e9:.3f} GFLOPs, Size: {size_mb:.2f} MB, Latency: {latency / 1e-3:.3f} ms")
-    return params, macs, size_mb, latency
+    print(f"Params: {params / 1e6:.3f} M, MACs: {macs / 1e9:.3f} GMACs, FLOPs: {flops / 1e9:.3f} GFLOPs, Size: {size_mb:.2f} MB")
+    return params, macs, size_mb
 
 
 def model_summary_with_frozen_counts(model, input_size=(3, 32, 32), summary=False):

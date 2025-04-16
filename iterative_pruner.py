@@ -96,15 +96,15 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
     # print(dir(original_model))
     
     accuracy_list = []
-    profiling = {"params":[], "MAC's":[], "model_size":[], "latency":[]}
+    profiling = {"params":[], "MAC's":[], "model_size":[]}#"latency":[]}
     
     print(f"{'-'*20}Starting with Experiment {exp_name}{'-'*20}")
-    acc_original, f1_original, params_original, mac_original, size_mb_original, latency_original = evaluate(original_model, test_loader, profiling=True, KD=False)
+    acc_original, f1_original, params_original, mac_original, size_mb_original = evaluate(original_model, test_loader, profiling=True, KD=False)
     accuracy_list.append(acc_original)
     profiling["params"].append(params_original)
     profiling["MAC's"].append(mac_original)
     profiling["model_size"].append(size_mb_original)
-    profiling["latency"].append(latency_original)
+    #profiling["latency"].append(latency_original)
                        
     prune_meta_data = []
     unprune_meta_data = []
@@ -156,14 +156,14 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
     else:
         fine_tuner_core(core_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, prune_ratio=0.3, exp_name=f"{exp_name}_Training_core_model_Level-4", LR=lr)
     
-    acc_pruned, f1_pruned, params_core, mac_core, size_mb_core, latency_core = evaluate(core_model, test_loader, profiling=True, KD=False)
+    acc_pruned, f1_pruned, params_core, mac_core, size_mb_core = evaluate(core_model, test_loader, profiling=True, KD=False)
     # torch.onnx.export(core_model, (torch.randn(1, 3, 32, 32).to(device),), f=f"./saves/onnx/{model_name}_Core_Model.onnx")
     # save_statedict(core_model, unprune_meta_data[-1]["num_unpruned_channels"], path=f"./saves/state_dicts/{exp_name}_{model_name}_Core_Model.pth")
     accuracy_list.append(acc_pruned)
     profiling["params"].append(params_core)
     profiling["MAC's"].append(mac_core)
     profiling["model_size"].append(size_mb_core)
-    profiling["latency"].append(latency_core)
+    #profiling["latency"].append(latency_core)
     model_summary_with_frozen_counts(core_model) 
 
     if rebuild:
@@ -189,7 +189,7 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
                 fine_tuner_core(rebuilt_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, prune_ratio=0.3, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=lr)
             # check = validate_frozen_channels(rebuilt_model, unprune_meta_data[i]["non_zero_channels_info"])
             # print(f"Channel Freezing applied correctly: {check}")
-            acc_rebuilt, f1_rebuilt, params_rebuilt, mac_rebuilt, size_mb_rebuilt, latency_rebuilt = evaluate(rebuilt_model, test_loader, profiling=True, KD=False)
+            acc_rebuilt, f1_rebuilt, params_rebuilt, mac_rebuilt, size_mb_rebuilt = evaluate(rebuilt_model, test_loader, profiling=True, KD=False)
             # torch.onnx.export(rebuilt_model, (torch.randn(1, 3, 32, 32).to(device),), f=f"./saves/onnx/{model_name}_Descendant_Model_Level-{i+1}.onnx")
             # save_statedict(rebuilt_model, new_channels, path=f"./saves/state_dicts/{exp_name}_{model_name}_Descendant_Model_Level-{i+1}.pth")
             core_model = rebuilt_model
@@ -198,7 +198,7 @@ def iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3
             profiling["params"].append(params_rebuilt)
             profiling["MAC's"].append(mac_rebuilt)
             profiling["model_size"].append(size_mb_rebuilt)
-            profiling["latency"].append(latency_rebuilt)
+            #profiling["latency"].append(latency_rebuilt)
             
 
         if prune_steps == 1:
@@ -222,15 +222,15 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
         optim = "SGD"
 
     accuracy_list = []
-    profiling = {"params":[], "MAC's":[], "model_size":[], "latency":[]}
+    profiling = {"params":[], "MAC's":[], "model_size":[]}#, "latency":[]}
     
     print(f"{'-'*20}Starting with Experiment {exp_name}{'-'*20}")
-    acc_original, f1_original, params_original, mac_original, size_mb_original, latency_original = evaluate(original_model, test_loader, profiling=True)
+    acc_original, f1_original, params_original, mac_original, size_mb_original = evaluate(original_model, test_loader, profiling=True)
     accuracy_list.append(acc_original)
     profiling["params"].append(params_original)
     profiling["MAC's"].append(mac_original)
     profiling["model_size"].append(size_mb_original)
-    profiling["latency"].append(latency_original)
+    #profiling["latency"].append(latency_original)
                        
     prune_meta_data = []
     unprune_meta_data = []
@@ -295,14 +295,14 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
 
     fine_tuner(core_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_core_model_Level-{str(prune_steps+1)}", LR=lr)
     # fine_tuner_BN(core_model, train_loader, val_loader, num_epochs=epochs, num_epochs_BN=10, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_core_model_Level-{str(prune_steps+1)}", LR=lr)
-    acc_pruned, f1_pruned, params_core, mac_core, size_mb_core, latency_core = evaluate(core_model, test_loader, profiling=True)
+    acc_pruned, f1_pruned, params_core, mac_core, size_mb_core = evaluate(core_model, test_loader, profiling=True)
     # torch.onnx.export(core_model, (torch.randn(1, 3, 32, 32).to(device),), f=f"./saves/onnx/{model_name}_Core_Model.onnx")
     save_statedict(core_model, unprune_meta_data[-1]["num_unpruned_channels"], path=f"./saves/state_dicts/{exp_name}_{model_name}_Core_Model.pth")
     accuracy_list.append(acc_pruned)
     profiling["params"].append(params_core)
     profiling["MAC's"].append(mac_core)
     profiling["model_size"].append(size_mb_core)
-    profiling["latency"].append(latency_core)
+    #profiling["latency"].append(latency_core)
     model_summary_with_frozen_counts(core_model) 
 
     if rebuild:
@@ -325,7 +325,7 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
             fine_tuner_zerograd(rebuilt_model, train_loader, val_loader, freeze_dim0, freeze_dim1, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=lr)
             # fine_tuner_BN(rebuilt_model, train_loader, val_loader, num_epochs=epochs, num_epochs_BN=10, optim_type=optim, scheduler_type=scheduler, 
             #               exp_name=f"{exp_name}_Training_model_Level-{i+1}", pruned_indices=prune_meta_data[i]["zero_channels_info"], unpruned_indices=unprune_meta_data[i]["non_zero_channels_info"], unpruned_weights=unprune_meta_data[i]["unpruned_weights"], LR=lr)
-            acc_rebuilt, f1_rebuilt, params_rebuilt, mac_rebuilt, size_mb_rebuilt, latency_rebuilt = evaluate(rebuilt_model, test_loader, profiling=True)
+            acc_rebuilt, f1_rebuilt, params_rebuilt, mac_rebuilt, size_mb_rebuilt = evaluate(rebuilt_model, test_loader, profiling=True)
             # torch.onnx.export(rebuilt_model, (torch.randn(1, 3, 32, 32).to(device),), f=f"./saves/onnx/{model_name}_Descendant_Model_Level-{i+1}.onnx")
             save_statedict(rebuilt_model, new_channels, path=f"./saves/state_dicts/{exp_name}_{model_name}_Descendant_Model_Level-{i+1}.pth")
             core_model = rebuilt_model
@@ -335,7 +335,7 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
             profiling["params"].append(params_rebuilt)
             profiling["MAC's"].append(mac_rebuilt)
             profiling["model_size"].append(size_mb_rebuilt)
-            profiling["latency"].append(latency_rebuilt)
+            # profiling["latency"].append(latency_rebuilt)
             
 
         if prune_steps == 1:
@@ -427,7 +427,7 @@ if __name__ == '__main__':
                             "Num_Params": profiling["params"],
                             "MAC's": profiling["MAC's"],
                             "Model Size (MB)": profiling["model_size"],
-                            "Latency": profiling["latency"]
+                            #"Latency": profiling["latency"]
                             })
                     
                     results_df = pd.DataFrame(results)
