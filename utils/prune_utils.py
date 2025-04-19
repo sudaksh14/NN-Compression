@@ -157,10 +157,10 @@ def get_pruned_channel_indices(tensor, amount, norm_type="L1", prune_step=0):
     total_channels = norms.size(0)                   # Total number of channels (out_channels)
 
     # Output the results
-    print(f"Number of channels with non-zero L1 norms: {non_zero_channels}")
-    print(f"Number of channels with zero L1 norms: {zero_channels}")
-    print(f"Total number of channels: {total_channels}")
-    print(total_channels == non_zero_channels + zero_channels)
+    # print(f"Number of channels with non-zero L1 norms: {non_zero_channels}")
+    # print(f"Number of channels with zero L1 norms: {zero_channels}")
+    # print(f"Total number of channels: {total_channels}")
+    # print(total_channels == non_zero_channels + zero_channels)
     
     if prune_step > 0:
         norms[norms == 0] = float('inf') # Set zero norms to infinity to avoid pruning them
@@ -224,7 +224,7 @@ def Index_Aware_pruner(model, amount, prune_step=0, res_blocks=3, plot=True, BN=
     for i, (name, module) in enumerate(model.named_modules()):
         if isinstance(module, nn.Conv2d):
             if name == "conv1" or name == "features.0":
-                print(name,  type(module))
+                # print(name,  type(module))
                 pruned_indices_0 = get_pruned_channel_indices(module.weight, amount, prune_step=prune_step)
                 pruner = ChannelPruning(pruned_indices_0, dim=0)
                 pruner.apply(module, name="weight", indices=pruned_indices_0, dim=0) # Prune along the output channel dimension
@@ -233,7 +233,7 @@ def Index_Aware_pruner(model, amount, prune_step=0, res_blocks=3, plot=True, BN=
  
             else:
                 
-                print(name,  type(module))
+                # print(name,  type(module))
                 if 'downsample' in name:
                     
                     pruner_down_1 = ChannelPruning(indices_down_1, dim=1)
@@ -260,7 +260,7 @@ def Index_Aware_pruner(model, amount, prune_step=0, res_blocks=3, plot=True, BN=
             if count != 0 and count % (res_blocks*2) == 0:
                 indices_down_1 = indices_last_layer
 
-            print("Pruned at output channel Indices: ", indices_last_layer.tolist())
+            # print("Pruned at output channel Indices: ", indices_last_layer.tolist())
             
             if plot:
                 visualize_4d_tensor(module.weight.data, title=f"Pruned weights in {name}", name=f"Resnet_{name}_pruned_weights")

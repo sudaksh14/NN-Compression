@@ -86,7 +86,7 @@ def model_size_in_mb(model):
 def profile_model(model, input_size):
     # macs, params = compute_flops_and_macs(model, input_size)
     # flops, macs, params = get_model_profile(model=model, input_shape=input_size, print_profile=True, as_string=False)
-    flops, macs, params = get_model_profile(model=model, input_shape=input_size, print_profile=True, as_string=False)
+    flops, macs, params = get_model_profile(model=model, input_shape=input_size, print_profile=False, as_string=False)
     size_mb = model_size_in_mb(model)
 
     print(f"Params: {params / 1e6:.3f} M, MACs: {macs / 1e9:.3f} GMACs, FLOPs: {flops / 1e9:.3f} GFLOPs, Size: {size_mb:.2f} MB")
