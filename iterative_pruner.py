@@ -317,7 +317,6 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
             del core_model
 
             rebuilt_model, freeze_dim0, freeze_dim1 = reconstruct_Global_weights_from_dicts(rebuilt_model, pruned_indices=prune_meta_data[i]["zero_channels_info"], pruned_weights=prune_meta_data[i]["pruned_weights"], unpruned_indices=unprune_meta_data[i]["non_zero_channels_info"], unpruned_weights=unprune_meta_data[i]["unpruned_weights"])
-            print(f"FREEEEZE DIM: {freeze_dim0}")
             rebuilt_model = restore_BN_weights(rebuilt_model, BN_params=BN_data[i]["BN_params"], restore_indices=freeze_dim0, restore_params=BN_data[i+1]["BN_params"], update_weights=True)
             model_summary_with_frozen_counts(rebuilt_model)
             
