@@ -68,14 +68,19 @@ def iterative_filter_pruning(
     lr=1e-3,
     optim="adam",
     exp_name="ToyExp_Global_Iter_Adaptivity_Resnet20",
+    hints=True,
 ):
     assert prune_steps == len(prune_ratio), (
         f"Expected Prune steps ({prune_steps}) to match the length of prune ratios ({len(prune_ratio)})."
     )
 
-    original_model = torch.hub.load(
-        "chenyaofo/pytorch-cifar-models", "cifar10_resnet20", pretrained=True
-    ).to(device)
+    if hints:
+        original_model = Resnet_General(channel_dict=None, KD=True, pre_train=True).to(device)
+        original_model.load_state_dict(torch.load("./pre-trained/resnet18_pre-trained_cifar10.pth"), strict=False)
+    else:
+        original_model = torch.hub.load(
+            "chenyaofo/pytorch-cifar-models", "cifar10_resnet20", pretrained=True
+        ).to(device)
 
     accuracy_list = []
     profiling = {"params": [], "MAC's": [], "model_size": []}
@@ -116,9 +121,14 @@ def iterative_filter_pruning(
     #         file.write("\n")  # Add a blank line between entries
 
     # Core Model Training
-    core_model = Resnet_General(unprune_meta_data[-1]["num_unpruned_channels"]).to(
-        device
-    )
+    if hints:
+        core_model = Resnet_General(unprune_meta_data[-1]["num_unpruned_channels"], KD=True).to(
+            device
+        )
+    else:
+        core_model = Resnet_General(unprune_meta_data[-1]["num_unpruned_channels"]).to(
+            device
+        )
     copy_weights_from_dict(
         core_model, unprune_meta_data[-1]["unpruned_weights"], None, False
     )

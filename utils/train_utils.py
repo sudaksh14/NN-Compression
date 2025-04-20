@@ -792,9 +792,6 @@ def KD_trainer_zerograd(student, teacher, train_loader, val_loader, lr, alpha, b
     val_accuracies = []
 
     for epoch in range(num_epochs):
-        teacher.eval()
-        student.train()
-
         train_total_loss = 0.0
         train_total_correct = 0
         train_total_samples = 0
@@ -802,6 +799,8 @@ def KD_trainer_zerograd(student, teacher, train_loader, val_loader, lr, alpha, b
 
         for inputs, labels in train_loader:
             inputs, labels = inputs.to(device), labels.to(device)
+
+            optimizer.zero_grad()
 
             # Forward pass
             student_outputs = student(inputs)
@@ -817,7 +816,6 @@ def KD_trainer_zerograd(student, teacher, train_loader, val_loader, lr, alpha, b
             loss = alpha * classification_loss + (1 - alpha) * distillation_loss
 
             # Backward pass
-            optimizer.zero_grad()
             loss.backward()
             if zero_out_grad:
                 zero_out_gradients_v2(student, freeze_dim0, freeze_dim1)
