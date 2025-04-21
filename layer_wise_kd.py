@@ -69,6 +69,7 @@ def iterative_filter_pruning(
     optim="adam",
     exp_name="ToyExp_Global_Iter_Adaptivity_Resnet20",
     hints=True,
+    layerwise=False,
 ):
     assert prune_steps == len(prune_ratio), (
         f"Expected Prune steps ({prune_steps}) to match the length of prune ratios ({len(prune_ratio)})."
@@ -76,7 +77,7 @@ def iterative_filter_pruning(
 
     if hints:
         original_model = Resnet_General(channel_dict=None, KD=True, pre_train=True).to(device)
-        original_model.load_state_dict(torch.load("./pre-trained/resnet18_pre-trained_cifar10.pth"), strict=False)
+        original_model.load_state_dict(torch.load("./pre-trained/resnet18_pre-trained_cifar10.pt"), strict=False)
     else:
         original_model = torch.hub.load(
             "chenyaofo/pytorch-cifar-models", "cifar10_resnet20", pretrained=True
@@ -203,6 +204,8 @@ if __name__ == "__main__":
         epochs=epochs,
         lr=lr,
         exp_name=f"Exp_{trial + 1}_{EXP}_ResNet18_{sch.upper()}_{str(lr)}",
+        hints=True,
+        layerwise=False,
     )
 
     results.append(
