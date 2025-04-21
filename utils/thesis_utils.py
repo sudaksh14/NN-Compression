@@ -9,20 +9,34 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def train_student_layer_wise(student, teacher, train_loader, val_loader, teacher_channels, student_channels, lr=0.001, alpha=0.75, device=device):
+def train_student_layer_wise(
+    student,
+    teacher,
+    train_loader,
+    val_loader,
+    teacher_channels,
+    student_channels,
+    lr=0.001,
+    alpha=0.75,
+    device=device,
+):
     teacher = teacher.to(device).eval()
     student = student.to(device).train()
 
     transformation_layers = []
 
     # Initialize the transformation layers
-    for (student_channel, teacher_channel) in list(zip(student_channel, teacher_channel)):
+    for student_channel, teacher_channel in list(zip(student_channel, teacher_channel)):
         transformation_layer.append()
-        transformation_layer = TransformationLayer(student_channels, teacher_channels).to(device)
+        transformation_layer = TransformationLayer(
+            student_channels, teacher_channels
+        ).to(device)
         hint_loss_fn = HintLoss()
         criterion = nn.CrossEntropyLoss()
 
-    optimizer = optim.Adam(list(student.parameters()) + list(transformation_layer.parameters()), lr=lr)
+    optimizer = optim.Adam(
+        list(student.parameters()) + list(transformation_layer.parameters()), lr=lr
+    )
 
     train_total_loss = 0.0
     train_total_correct = 0
@@ -83,31 +97,61 @@ def train_student_layer_wise(student, teacher, train_loader, val_loader, teacher
     val_avg_loss = val_total_loss / val_total_samples
     val_accuracy = val_total_correct / val_total_samples
 
-    return train_avg_loss, train_avg_hint_loss, train_accuracy, val_avg_loss, val_accuracy
+    return (
+        train_avg_loss,
+        train_avg_hint_loss,
+        train_accuracy,
+        val_avg_loss,
+        val_accuracy,
+    )
 
 
-def KD_trainer_zerograd(student, teacher, train_loader, val_loader, lr, alpha, beta, freeze_dim0, freeze_dim1, num_epochs=20, exp_name="KD zero out grad", zero_out_grad=False, KD_variant="hints"):
+def KD_trainer_zerograd(
+    student,
+    teacher,
+    train_loader,
+    val_loader,
+    lr,
+    alpha,
+    beta,
+    freeze_dim0,
+    freeze_dim1,
+    num_epochs=20,
+    exp_name="KD zero out grad",
+    zero_out_grad=False,
+    KD_variant="hints",
+):
     teacher = teacher.to(device)
     student = student.to(device)
 
     if KD_variant == "layer_wise":
         transformation_layers = []
-        for (student_channel, teacher_channel) in list(zip(student_channel, teacher_channel)):
+        for student_channel, teacher_channel in list(
+            zip(student_channel, teacher_channel)
+        ):
             transformation_layer.append()
-            transformation_layer = TransformationLayer(student_channels, teacher_channels).to(device)
+            transformation_layer = TransformationLayer(
+                student_channels, teacher_channels
+            ).to(device)
             hint_loss_fn = HintLoss()
             criterion = nn.CrossEntropyLoss()
-        optimizer = optim.Adam(list(student.parameters()) + list(transformation_layer.parameters()), lr=lr)
+        optimizer = optim.Adam(
+            list(student.parameters()) + list(transformation_layer.parameters()), lr=lr
+        )
     elif KD_variant == "hints":
-            transformation_layer = TransformationLayer(student_channels, teacher_channels).to(device)
-            hint_loss_fn = HintLoss()
-            criterion = nn.CrossEntropyLoss()
-            optimizer = optim.Adam(list(student.parameters()) + list(transformation_layer.parameters()), lr=lr)
+        transformation_layer = TransformationLayer(
+            student_channels, teacher_channels
+        ).to(device)
+        hint_loss_fn = HintLoss()
+        criterion = nn.CrossEntropyLoss()
+        optimizer = optim.Adam(
+            list(student.parameters()) + list(transformation_layer.parameters()), lr=lr
+        )
     else:
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.Adam(student.parameters(), lr=lr)
         scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=0)
-    
+
     if KD_variant == "hints":
         train_hint_losses = []
     elif KD_variant == "layer-wise":
@@ -137,9 +181,11 @@ def KD_trainer_zerograd(student, teacher, train_loader, val_loader, lr, alpha, b
 
             # Compute losses
             classification_loss = criterion(student_outputs, labels)
-            distillation_loss = F.kl_div(F.log_softmax(student_outputs / beta, dim=1),
-                                        F.softmax(teacher_outputs / beta, dim=1),
-                                        reduction="batchmean") * (beta ** 2)
+            distillation_loss = F.kl_div(
+                F.log_softmax(student_outputs / beta, dim=1),
+                F.softmax(teacher_outputs / beta, dim=1),
+                reduction="batchmean",
+            ) * (beta**2)
 
             loss = alpha * classification_loss + (1 - alpha) * distillation_loss
 
@@ -157,7 +203,9 @@ def KD_trainer_zerograd(student, teacher, train_loader, val_loader, lr, alpha, b
             train_total_samples += inputs.size(0)
 
         train_avg_loss = train_total_loss / train_total_samples
-        train_avg_distillation_loss = train_total_distillation_loss / train_total_samples
+        train_avg_distillation_loss = (
+            train_total_distillation_loss / train_total_samples
+        )
         train_accuracy = train_total_correct / train_total_samples
 
         # Validation loop
@@ -192,6 +240,8 @@ def KD_trainer_zerograd(student, teacher, train_loader, val_loader, lr, alpha, b
 
         scheduler.step()
 
-        print(f"Epoch [{epoch + 1}/{num_epochs}]: Train Loss: {train_avg_loss:.4f}, Train Acc: {train_accuracy:.4f}, Val Loss: {val_avg_loss:.4f}, Val Acc: {val_accuracy:.4f}")
+        print(
+            f"Epoch [{epoch + 1}/{num_epochs}]: Train Loss: {train_avg_loss:.4f}, Train Acc: {train_accuracy:.4f}, Val Loss: {val_avg_loss:.4f}, Val Acc: {val_accuracy:.4f}"
+        )
 
     print("Knowledge Distillation Training Complete")

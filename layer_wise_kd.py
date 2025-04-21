@@ -76,8 +76,12 @@ def iterative_filter_pruning(
     )
 
     if hints:
-        original_model = Resnet_General(channel_dict=None, KD=True, pre_train=True).to(device)
-        original_model.load_state_dict(torch.load("./pre-trained/resnet18_pre-trained_cifar10.pt"), strict=False)
+        original_model = Resnet_General(channel_dict=None, KD=True, pre_train=True).to(
+            device
+        )
+        original_model.load_state_dict(
+            torch.load("./pre-trained/resnet18_pre-trained_cifar10.pt", weights_only=True), strict=False
+        )
     else:
         original_model = torch.hub.load(
             "chenyaofo/pytorch-cifar-models", "cifar10_resnet20", pretrained=True
@@ -88,7 +92,7 @@ def iterative_filter_pruning(
 
     print(f"{'-' * 20}Starting with Experiment {exp_name}{'-' * 20}")
     acc_original, f1_original, params_original, mac_original, size_mb_original = (
-        evaluate(original_model, test_loader, profiling=True)
+        evaluate(original_model, test_loader, profiling=True, KD=True)
     )
     accuracy_list.append(acc_original)
     profiling["params"].append(params_original)
@@ -123,9 +127,9 @@ def iterative_filter_pruning(
 
     # Core Model Training
     if hints:
-        core_model = Resnet_General(unprune_meta_data[-1]["num_unpruned_channels"], KD=True).to(
-            device
-        )
+        core_model = Resnet_General(
+            unprune_meta_data[-1]["num_unpruned_channels"], KD=True
+        ).to(device)
     else:
         core_model = Resnet_General(unprune_meta_data[-1]["num_unpruned_channels"]).to(
             device
@@ -165,16 +169,19 @@ def iterative_filter_pruning(
         train_loader=train_loader,
         val_loader=val_loader,
         teacher_channels=64,
-        student_channels=unprune_meta_data[-1]["num_unpruned_channels"]['layer3.2.conv2'][0],
+        student_channels=unprune_meta_data[-1]["num_unpruned_channels"][
+            "layer3.2.conv2"
+        ][0],
         lr=lr,
         alpha=0.75,
         beta=3,
         num_epochs=epochs,
         exp_name=f"{exp_name}_Training_model_Level-{i + 1}",
-        KD_variant="hints")
+        KD_variant="hints",
+    )
 
     acc_pruned, f1_pruned, params_core, mac_core, size_mb_core = evaluate(
-        core_model, test_loader, profiling=True
+        core_model, test_loader, profiling=True, KD=True
     )
 
     save_statedict(
