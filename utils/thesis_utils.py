@@ -114,6 +114,7 @@ def KD_LW_trainer(
     lr,
     alpha,
     beta,
+    omega,
     student_channels,
     teacher_channels,
     num_epochs=20,
@@ -124,18 +125,13 @@ def KD_LW_trainer(
     student = student.to(device)
 
     if KD_variant == "layer_wise":
-        transformation_layers = []
-        for student_channel, teacher_channel in list(
-            zip(student_channel, teacher_channel)
-        ):
-            transformation_layer.append()
-            transformation_layer = TransformationLayer(
-                student_channels, teacher_channels
-            ).to(device)
-            hint_loss_fn = HintLoss()
-            criterion = nn.CrossEntropyLoss()
+        transformation_layer1 = TransformationLayer(student_channels[0], teacher_channels[0]).to(device)
+        transformation_layer2 = TransformationLayer(student_channels[1], teacher_channels[1]).to(device)
+        transformation_layer3 = TransformationLayer(student_channels[2], teacher_channels[2]).to(device)
+        hint_loss_fn = HintLoss()
+        criterion = nn.CrossEntropyLoss()
         optimizer = optim.Adam(
-            list(student.parameters()) + list(transformation_layer.parameters()), lr=lr
+            list(student.parameters()) + list(transformation_layer1.parameters())+ list(transformation_layer2.parameters())+ list(transformation_layer3.parameters()), lr=lr
         )
     elif KD_variant == "hints":
         transformation_layer = TransformationLayer(
@@ -174,9 +170,9 @@ def KD_LW_trainer(
             optimizer.zero_grad()
 
             # Forward pass
-            student_outputs = student(inputs)
+            student_outputs, inter_student1, inter_student2, inter_student3 = student(inputs)
             with torch.no_grad():
-                teacher_outputs = teacher(inputs)
+                teacher_outputs, inter_teacher1, inter_teacher2, inter_teacher3 = teacher(inputs)
 
             # Compute losses
             classification_loss = criterion(student_outputs, labels)
@@ -185,8 +181,10 @@ def KD_LW_trainer(
                 F.softmax(teacher_outputs / beta, dim=1),
                 reduction="batchmean",
             ) * (beta**2)
+            hint_loss = hint_loss_fn(transformation_layer1(inter_student1), inter_teacher1) + hint_loss_fn(transformation_layer2(inter_student2), inter_teacher2) + hint_loss_fn(transformation_layer3(inter_student3), inter_teacher3)
 
-            loss = alpha * classification_loss + (1 - alpha) * distillation_loss
+            # Experimentation will need to be done to find the optimal alpha and omega
+            loss = alpha * classification_loss + (1 - alpha) * (omega * distillation_loss + (1-omega) * hint_loss)
 
             # Backward pass
             loss.backward()

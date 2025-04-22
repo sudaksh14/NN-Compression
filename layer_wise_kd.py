@@ -125,7 +125,8 @@ def iterative_filter_pruning(
                 "unpruned_weights": unpruned_weights,
             }
         )
-    print(unprune_meta_data[-1]["num_unpruned_channels"])
+    #print(unprune_meta_data[-1]["num_unpruned_channels"])
+
     # with open(f"./saves/pruning_metadata/{exp_name}_unprune_data.txt", "w") as file:
     #     for index, dictionary in enumerate(unprune_meta_data):
     #         file.write(f"Entry {index + 1}:\n")
@@ -136,9 +137,9 @@ def iterative_filter_pruning(
     # Core Model Training
     if layerwise:
         core_model = Resnet_General(
-            unprune_meta_data[-1]["num_unpruned_channels"], KD=True
+            unprune_meta_data[-1]["num_unpruned_channels"], KD=True, layerwise=True
         ).to(device)
-    if hints:
+    elif hints:
         core_model = Resnet_General(
             unprune_meta_data[-1]["num_unpruned_channels"], KD=True
         ).to(device)
@@ -206,6 +207,7 @@ def iterative_filter_pruning(
             "layer1.2.conv2"
         ][0]],
         lr=lr,
+        omega=0.6,
         alpha=0.75,
         beta=3,
         num_epochs=epochs,

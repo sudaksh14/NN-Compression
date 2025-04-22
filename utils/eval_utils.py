@@ -37,7 +37,7 @@ def evaluate(model, data_loader, plot_title="Test Accuracy & F1-Score", device=d
                 _, preds = torch.max(outputs, 1)
                 all_preds.extend(preds.cpu().numpy())
                 all_labels.extend(labels.cpu().numpy())
-    if KD:
+    elif KD:
         with torch.no_grad():
             for inputs, labels in data_loader:
                 inputs, labels = inputs.to(device), labels.to(device)
