@@ -11,6 +11,7 @@ from utils.visualize_utils import *
 from utils.prune_utils import *
 from utils.train_utils import *
 from models.Resnet import *
+from utils.thesis_utils import *
 from models.VGG import *
 from copy import deepcopy
 from tqdm import tqdm
@@ -75,7 +76,14 @@ def iterative_filter_pruning(
         f"Expected Prune steps ({prune_steps}) to match the length of prune ratios ({len(prune_ratio)})."
     )
 
-    if hints:
+    if layerwise:
+        original_model = Resnet_General(channel_dict=None, KD=True, pre_train=True, layerwise=True).to(
+            device
+        )
+        original_model.load_state_dict(
+            torch.load("./pre-trained/resnet18_pre-trained_cifar10.pt", weights_only=True), strict=False
+        )
+    elif hints:
         original_model = Resnet_General(channel_dict=None, KD=True, pre_train=True).to(
             device
         )
@@ -92,7 +100,7 @@ def iterative_filter_pruning(
 
     print(f"{'-' * 20}Starting with Experiment {exp_name}{'-' * 20}")
     acc_original, f1_original, params_original, mac_original, size_mb_original = (
-        evaluate(original_model, test_loader, profiling=True, KD=True)
+        evaluate(original_model, test_loader, profiling=True, KD=False, layerwise=True)
     )
     accuracy_list.append(acc_original)
     profiling["params"].append(params_original)
@@ -117,7 +125,7 @@ def iterative_filter_pruning(
                 "unpruned_weights": unpruned_weights,
             }
         )
-
+    print(unprune_meta_data[-1]["num_unpruned_channels"])
     # with open(f"./saves/pruning_metadata/{exp_name}_unprune_data.txt", "w") as file:
     #     for index, dictionary in enumerate(unprune_meta_data):
     #         file.write(f"Entry {index + 1}:\n")
@@ -126,6 +134,10 @@ def iterative_filter_pruning(
     #         file.write("\n")  # Add a blank line between entries
 
     # Core Model Training
+    if layerwise:
+        core_model = Resnet_General(
+            unprune_meta_data[-1]["num_unpruned_channels"], KD=True
+        ).to(device)
     if hints:
         core_model = Resnet_General(
             unprune_meta_data[-1]["num_unpruned_channels"], KD=True
@@ -163,25 +175,44 @@ def iterative_filter_pruning(
     #     zero_out_grad=False,
     # )
 
-    KD_trainer(
+    # KD_trainer(
+    #     student=core_model,
+    #     teacher=orig_copy,
+    #     train_loader=train_loader,
+    #     val_loader=val_loader,
+    #     teacher_channels=64,
+    #     student_channels=unprune_meta_data[-1]["num_unpruned_channels"][
+    #         "layer3.2.conv2"
+    #     ][0],
+    #     lr=lr,
+    #     alpha=0.75,
+    #     beta=3,
+    #     num_epochs=epochs,
+    #     exp_name=f"{exp_name}_Training_model_Level-{i + 1}",
+    #     KD_variant="hints",
+    # )
+
+    KD_LW_trainer(
         student=core_model,
         teacher=orig_copy,
         train_loader=train_loader,
         val_loader=val_loader,
-        teacher_channels=64,
-        student_channels=unprune_meta_data[-1]["num_unpruned_channels"][
+        teacher_channels=[16, 32, 64],
+        student_channels=[unprune_meta_data[-1]["num_unpruned_channels"][
             "layer3.2.conv2"
-        ][0],
+        ][0], unprune_meta_data[-1]["num_unpruned_channels"][
+            "layer2.2.conv2"
+        ][0], unprune_meta_data[-1]["num_unpruned_channels"][
+            "layer1.2.conv2"
+        ][0]],
         lr=lr,
         alpha=0.75,
         beta=3,
         num_epochs=epochs,
-        exp_name=f"{exp_name}_Training_model_Level-{i + 1}",
-        KD_variant="hints",
     )
 
     acc_pruned, f1_pruned, params_core, mac_core, size_mb_core = evaluate(
-        core_model, test_loader, profiling=True, KD=True
+        core_model, test_loader, profiling=True, KD=False, layerwise=True
     )
 
     save_statedict(
@@ -211,8 +242,8 @@ if __name__ == "__main__":
         epochs=epochs,
         lr=lr,
         exp_name=f"Exp_{trial + 1}_{EXP}_ResNet18_{sch.upper()}_{str(lr)}",
-        hints=True,
-        layerwise=False,
+        hints=False,
+        layerwise=True,
     )
 
     results.append(

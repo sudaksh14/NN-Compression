@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from train_utils import TransformationLayer, HintLoss
+from utils.train_utils import TransformationLayer, HintLoss
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import CosineAnnealingLR
@@ -106,7 +106,7 @@ def train_student_layer_wise(
     )
 
 
-def KD_trainer_zerograd(
+def KD_LW_trainer(
     student,
     teacher,
     train_loader,
@@ -114,12 +114,11 @@ def KD_trainer_zerograd(
     lr,
     alpha,
     beta,
-    freeze_dim0,
-    freeze_dim1,
+    student_channels,
+    teacher_channels,
     num_epochs=20,
-    exp_name="KD zero out grad",
-    zero_out_grad=False,
-    KD_variant="hints",
+    exp_name="KD LW",
+    KD_variant="layer_wise",
 ):
     teacher = teacher.to(device)
     student = student.to(device)
@@ -191,8 +190,6 @@ def KD_trainer_zerograd(
 
             # Backward pass
             loss.backward()
-            if zero_out_grad:
-                zero_out_gradients_v2(student, freeze_dim0, freeze_dim1)
             optimizer.step()
 
             # Update train metrics

@@ -87,6 +87,39 @@ class ResNet_KD_Pretrain(nn.Module):
         return out, inter
 
 
+class ResNet_LW_KD_Pretrain(nn.Module):
+    def __init__(self, block, num_blocks):
+        super(ResNet_LW_KD_Pretrain, self).__init__()
+        self.in_channels = 16
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=3, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(16)
+        self.layer1 = self._make_layer(block, 16, num_blocks[0])
+        self.layer2 = self._make_layer(block, 32, num_blocks[1], stride=2)
+        self.layer3 = self._make_layer(block, 64, num_blocks[2], stride=2)
+        self.fc = nn.Linear(64, 10)
+
+    def _make_layer(self, block, out_channels, blocks, stride=1):
+        layers = []
+        layers.append(block(self.in_channels, out_channels))
+        self.in_channels = out_channels
+        for _ in range(1, blocks):
+            layers.append(block(out_channels, out_channels))
+        return nn.Sequential(*layers)
+
+    def forward(self, x):
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.layer1(out)
+        inter1 = out
+        out = self.layer2(out)
+        inter2 = out
+        out = self.layer3(out)
+        inter3 = out
+        out = F.adaptive_avg_pool2d(out,(1, 1))
+        out = out.view(out.size(0), -1)
+        out = self.fc(out)
+        return out, inter1, inter2, inter3
+
+
 class ResNet_general(nn.Module):
     def __init__(self, block, num_blocks, channel_dict):
         super(ResNet_general, self).__init__()
@@ -150,7 +183,9 @@ class ResNet_KD(nn.Module):
         return out,  intermediate
     
 
-def Resnet_General(channel_dict, KD=False, pre_train=False):
+def Resnet_General(channel_dict, KD=False, pre_train=False, layerwise=False):
+    if KD and pre_train and layerwise:
+        return ResNet_LW_KD_Pretrain(BasicBlock, [3,3,3])
     if KD and pre_train:
         return ResNet_KD_Pretrain(BasicBlock, [3,3,3])
     elif KD:
