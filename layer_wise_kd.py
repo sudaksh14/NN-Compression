@@ -77,18 +77,24 @@ def iterative_filter_pruning(
     )
 
     if layerwise:
-        original_model = Resnet_General(channel_dict=None, KD=True, pre_train=True, layerwise=True).to(
-            device
-        )
+        original_model = Resnet_General(
+            channel_dict=None, KD=True, pre_train=True, layerwise=True
+        ).to(device)
         original_model.load_state_dict(
-            torch.load("./pre-trained/resnet18_pre-trained_cifar10.pt", weights_only=True), strict=False
+            torch.load(
+                "./pre-trained/resnet18_pre-trained_cifar10.pt", weights_only=True
+            ),
+            strict=False,
         )
     elif hints:
         original_model = Resnet_General(channel_dict=None, KD=True, pre_train=True).to(
             device
         )
         original_model.load_state_dict(
-            torch.load("./pre-trained/resnet18_pre-trained_cifar10.pt", weights_only=True), strict=False
+            torch.load(
+                "./pre-trained/resnet18_pre-trained_cifar10.pt", weights_only=True
+            ),
+            strict=False,
         )
     else:
         original_model = torch.hub.load(
@@ -125,7 +131,7 @@ def iterative_filter_pruning(
                 "unpruned_weights": unpruned_weights,
             }
         )
-    #print(unprune_meta_data[-1]["num_unpruned_channels"])
+    # print(unprune_meta_data[-1]["num_unpruned_channels"])
 
     # with open(f"./saves/pruning_metadata/{exp_name}_unprune_data.txt", "w") as file:
     #     for index, dictionary in enumerate(unprune_meta_data):
@@ -199,13 +205,11 @@ def iterative_filter_pruning(
         train_loader=train_loader,
         val_loader=val_loader,
         teacher_channels=[16, 32, 64],
-        student_channels=[unprune_meta_data[-1]["num_unpruned_channels"][
-            "layer3.2.conv2"
-        ][0], unprune_meta_data[-1]["num_unpruned_channels"][
-            "layer2.2.conv2"
-        ][0], unprune_meta_data[-1]["num_unpruned_channels"][
-            "layer1.2.conv2"
-        ][0]],
+        student_channels=[
+            unprune_meta_data[-1]["num_unpruned_channels"]["layer1.2.conv2"][0],
+            unprune_meta_data[-1]["num_unpruned_channels"]["layer2.2.conv2"][0],
+            unprune_meta_data[-1]["num_unpruned_channels"]["layer3.2.conv2"][0],
+        ],
         lr=lr,
         omega=0.6,
         alpha=0.75,
