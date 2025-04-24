@@ -84,6 +84,7 @@ def iterative_filter_pruning(
             torch.load(
                 "./pre-trained/resnet18_pre-trained_cifar10.pt", weights_only=True
             ),
+            # torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_resnet20", pretrained=True),
             strict=False,
         )
     elif hints:

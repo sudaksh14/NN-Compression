@@ -530,6 +530,14 @@ def fine_tuner_BN(model, train_loader, val_loader, num_epochs, num_epochs_BN, op
     print("Fine-Tuning Complete")     
 
 
+class LayerLoss(nn.Module):
+    def __init__(self):
+        super(HintLoss, self).__init__()
+        self.mse_loss = nn.MSELoss()
+
+    def forward(self, teacher_features, transformed_student_features):
+        return self.mse_loss(teacher_features, transformed_student_features)
+
 
 class HintLoss(nn.Module):
     def __init__(self):
@@ -538,6 +546,7 @@ class HintLoss(nn.Module):
 
     def forward(self, teacher_features, transformed_student_features):
         return self.mse_loss(teacher_features, transformed_student_features)
+
 
 class TransformationLayer(nn.Module):
     def __init__(self, in_channels, out_channels):
@@ -553,6 +562,7 @@ class TransformationLayer(nn.Module):
 
     def forward(self, x):
         return self.transform(x)
+
 
 def validate(model, val_loader, criterion, device):
     model.eval()
@@ -579,6 +589,7 @@ def validate(model, val_loader, criterion, device):
     accuracy = total_correct / total_samples
 
     return avg_loss, accuracy
+
 
 def train_accuracy(model, train_loader, device):
     model.eval()
@@ -741,10 +752,120 @@ def train_student_with_distillation(student, teacher, train_loader, val_loader, 
     return train_avg_loss, train_avg_distillation_loss, train_accuracy, val_avg_loss, val_accuracy
 
 
-def KD_trainer(student, teacher, train_loader, val_loader, teacher_channels, student_channels, lr, alpha, beta, num_epochs=1, exp_name="KD", KD_variant="hints"):
+def train_student_with_layerwise(
+        student, 
+        teacher, 
+        train_loader, 
+        val_loader, 
+        teacher_channels,
+        student_channels,
+        n_epochs,
+        lr=0.001, 
+        alpha=0.75, 
+        beta=3, 
+        omega=0.6, 
+        device=device
+    ):
+    teacher = teacher.to(device).eval()
+    student = student.to(device).train()
+
+    # Initialize the transformation layer
+
+    transformation_layers = [
+        TransformationLayer(student_ch, teacher_ch).to(device) for student_ch, teacher_ch in zip(student_channels, teacher_channels)
+    ]
+
+    all_params = list(student.parameters()) + [
+        param for layer in transformation_layers for param in layer.parameters()
+    ]
+
+    optimizer = optim.Adam(all_params, lr=lr)
+    layer_loss_fn = LayerLoss()
+    criterion = nn.CrossEntropyLoss()
+
+    train_total_loss = 0.0
+    train_total_correct = 0
+    train_total_samples = 0
+    train_total_layerwise_loss = 0.0
+
+    for inputs, labels in train_loader:
+        inputs, labels = inputs.to(device), labels.to(device)
+
+        # Forward pass
+        student_outputs, inter_student1, inter_student2, inter_student3 = student(inputs)
+        with torch.no_grad():
+            teacher_outputs, inter_teacher1, inter_teacher2, inter_teacher3 = teacher(inputs)
+
+        classification_loss = criterion(student_outputs, labels)
+        distillation_loss = F.kl_div(
+            F.log_softmax(student_outputs / beta, dim=1),
+            F.softmax(teacher_outputs / beta, dim=1),
+            reduction="batchmean",
+        ) * (beta**2)
+        layer_loss = (
+            layer_loss_fn(transformation_layers[0](inter_student1), inter_teacher1)
+            + layer_loss_fn(transformation_layers[1](inter_student2), inter_teacher2)
+            + layer_loss_fn(transformation_layers[2](inter_student3), inter_teacher3)
+        )
+
+        # Experimentation will need to be done to find the optimal alpha and omega
+        loss = alpha * classification_loss + (1 - alpha) * (
+            omega * distillation_loss + (1 - omega) * layer_loss
+        )
+
+        # Backward pass
+        loss.backward()
+        optimizer.step()
+
+        # Backward pass
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        # Update train metrics
+        train_total_loss += loss.item() * inputs.size(0)
+        train_total_layerwise_loss += layer_loss.item() * inputs.size(0)
+        _, predicted = torch.max(student_outputs, dim=1)
+        train_total_correct += (predicted == labels).sum().item()
+        train_total_samples += inputs.size(0)
+
+    train_avg_loss = train_total_loss / train_total_samples
+    train_avg_layer_loss = train_total_layerwise_loss / train_total_samples
+    train_accuracy = train_total_correct / train_total_samples
+
+    # Validation looph
+    student.eval()
+
+    val_total_loss = 0.0
+    val_total_correct = 0
+    val_total_samples = 0
+
+    with torch.no_grad():
+        for inputs, labels in val_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+
+            # Forward pass
+            outputs, _, _, _ = student(inputs)
+            loss = criterion(outputs, labels)
+
+            # Update validation metrics
+            val_total_loss += loss.item() * inputs.size(0)
+            _, predicted = torch.max(outputs, dim=1)
+            val_total_correct += (predicted == labels).sum().item()
+            val_total_samples += inputs.size(0)
+
+    val_avg_loss = val_total_loss / val_total_samples
+    val_accuracy = val_total_correct / val_total_samples
+
+    return train_avg_loss, train_avg_layer_loss, train_accuracy, val_avg_loss, val_accuracy
+
+
+def KD_trainer(student, teacher, train_loader, val_loader, teacher_channels, student_channels, lr, alpha, beta, num_epochs=20, exp_name="KD", KD_variant="hints"):
     train_losses = []
     if KD_variant == "hints":
         train_hint_losses = []
+    elif KD_variant == "layerwise":
+        train_layerwise_losses = []
     else:
         train_distillation_losses = []
     train_accuracies = []
@@ -755,14 +876,18 @@ def KD_trainer(student, teacher, train_loader, val_loader, teacher_channels, stu
         if KD_variant == "hints":
             train_avg_loss, train_avg_hint_loss, train_accuracy, val_avg_loss, val_accuracy = train_student_with_hints(
                 student, teacher, train_loader, val_loader, teacher_channels, student_channels, lr)
+        elif KD_variant == "layerwise":
+            train_avg_loss, train_avg_layerwise_loss, train_accuracy, val_avg_loss, val_accuracy = train_student_with_layerwise(
+                student, teacher, train_loader, val_loader, teacher_channels, student_channels, num_epochs, lr)
         else:
             train_avg_loss, train_avg_distillation_loss, train_accuracy, val_avg_loss, val_accuracy = train_student_with_distillation(
                 student, teacher, train_loader, val_loader, lr, alpha, beta)
 
-
         train_losses.append(train_avg_loss)
         if KD_variant == "hints":
             train_hint_losses.append(train_avg_hint_loss)
+        elif KD_variant == "layerwise":
+            train_layerwise_losses.append(train_avg_layerwise_loss)
         else:
             train_distillation_losses.append(train_avg_distillation_loss)
         train_accuracies.append(train_accuracy)
@@ -773,6 +898,8 @@ def KD_trainer(student, teacher, train_loader, val_loader, teacher_channels, stu
 
     if KD_variant == "hints":
         plot_KD_metrics(train_losses, train_hint_losses, train_accuracies, val_losses, val_accuracies, num_epochs, exp_name, KD_variant)
+    elif KD_variant == "layerwise":
+        plot_KD_metrics(train_losses, train_layerwise_losses, train_accuracies, val_losses, val_accuracies, num_epochs, exp_name, KD_variant)
     else:
         plot_KD_metrics(train_losses, train_distillation_losses, train_accuracies, val_losses, val_accuracies, num_epochs, exp_name, KD_variant)
     print("Knowledge Distillation Training Complete")

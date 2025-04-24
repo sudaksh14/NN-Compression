@@ -282,6 +282,8 @@ def plot_KD_metrics(train_losses, train_KD_losses, train_accuracies, val_losses,
     plt.plot(epochs_range, train_losses, label="Train Loss")
     if KD_variant == "hints":
         plt.plot(epochs_range, train_KD_losses, label="Hint Loss")
+    elif KD_variant == "layerwise":
+        plt.plot(epochs_range, train_KD_losses, label="Layerwise Loss")
     else:
         plt.plot(epochs_range, train_KD_losses, label="Distillation Loss")
     plt.plot(epochs_range, val_losses, label="Validation Loss")
