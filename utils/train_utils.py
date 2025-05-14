@@ -218,7 +218,7 @@ def save_statedict(model, channel_dict, path="./saves/state_dicts"):
 
 
 
-def fine_tuner(model, train_loader, val_loader, num_epochs, optim_type, scheduler_type, exp_name, device=device, LR=1e-3):
+def fine_tuner(model, train_loader, val_loader, num_epochs, optim_type, scheduler_type, exp_name, LR=1e-3):
 
     model = model.to(device)
 
@@ -532,7 +532,7 @@ def fine_tuner_BN(model, train_loader, val_loader, num_epochs, num_epochs_BN, op
 
 class LayerLoss(nn.Module):
     def __init__(self):
-        super(HintLoss, self).__init__()
+        super(LayerLoss, self).__init__()
         self.mse_loss = nn.MSELoss()
 
     def forward(self, teacher_features, transformed_student_features):
@@ -605,7 +605,7 @@ def train_accuracy(model, train_loader, device):
     return 100 * correct / total
 
 
-def train_student_with_hints(student, teacher, train_loader, val_loader, teacher_channels, student_channels, lr=0.001, alpha=0.75, device=device):
+def train_student_with_hints(student, teacher, train_loader, val_loader, teacher_channels, student_channels, lr=0.001, alpha=0.75):
     teacher = teacher.to(device).eval()
     student = student.to(device).train()
 
@@ -679,7 +679,7 @@ def train_student_with_hints(student, teacher, train_loader, val_loader, teacher
 
 
 
-def train_student_with_distillation(student, teacher, train_loader, val_loader, lr=0.001, alpha=0.75, beta=3, device=device):
+def train_student_with_distillation(student, teacher, train_loader, val_loader, lr=0.001, alpha=0.75, beta=3):
     teacher = teacher.to(device).eval()
     student = student.to(device).train()
 
@@ -764,7 +764,6 @@ def train_student_with_layerwise(
         alpha=0.75, 
         beta=3, 
         omega=0.6, 
-        device=device
     ):
     teacher = teacher.to(device).eval()
     student = student.to(device).train()
@@ -860,7 +859,7 @@ def train_student_with_layerwise(
     return train_avg_loss, train_avg_layer_loss, train_accuracy, val_avg_loss, val_accuracy
 
 
-def KD_trainer(student, teacher, train_loader, val_loader, teacher_channels, student_channels, lr, alpha, beta, omega, num_epochs=20, exp_name="KD", KD_variant="hints"):
+def KD_trainer(student, teacher, train_loader, val_loader, teacher_channels, student_channels, lr, alpha, beta, omega, num_epochs=20, exp_name="KD", KD_variant="hints", device=device):
     train_losses = []
     if KD_variant == "hints":
         train_hint_losses = []

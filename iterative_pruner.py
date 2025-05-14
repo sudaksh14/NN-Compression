@@ -359,7 +359,6 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
             num_epochs=epochs,
             exp_name=exp_name,
             KD_variant="layerwise",
-            device=device,
         )
     elif KD_variant == "hints":
         KD_trainer(
@@ -376,7 +375,6 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
             num_epochs=epochs,
             exp_name=exp_name,
             KD_variant="hints",
-            device=device,
         )
     elif KD_variant == "regular":
         KD_trainer(
@@ -385,7 +383,7 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
             train_loader=train_loader,
             val_loader=val_loader,
             teacher_channels=None,
-            student_channels=None
+            student_channels=None,
             lr=lr,
             omega=omega,
             alpha=alpha,
@@ -393,7 +391,6 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
             num_epochs=epochs,
             KD_variant="regular",
             exp_name=exp_name,
-            device=device,
         )
     else:
         fine_tuner(
@@ -405,7 +402,6 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
             scheduler_type=scheduler, 
             prune_ratio=prune_ratio, 
             exp_name=f"{exp_name}_Training_core_modelr", 
-            device=device,
             LR=lr,
         )
         
@@ -476,7 +472,6 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
             profiling["params"].append(params_rebuilt)
             profiling["MAC's"].append(mac_rebuilt)
             profiling["model_size"].append(size_mb_rebuilt)
-            # profiling["latency"].append(latency_rebuilt)
             
 
         if prune_steps == 1:
@@ -544,7 +539,7 @@ if __name__ == '__main__':
             for alpha in alphas:
                 for omega in omegas:
                     for variant in variants:
-                        test_acc, profiling = Global_iterative_filter_pruning(scheduler=sch, prune_steps=1, prune_ratio=0.3, model_name=model, epochs=epoch, alpha=alpha, omega=omega, lr=lr, exp_name=f"Exp_{trial+1}_{EXP}_{model.upper()}_{sch.upper()}_Lr_{str(lr)}_Epoch_{str(epoch)}_alpha_{str(alpha)}_omega_{str(omega)}", rebuild=False, KD_variant=variant, device=device)
+                        test_acc, profiling = Global_iterative_filter_pruning(scheduler=sch, prune_steps=1, prune_ratio=[0.3], model_name=model, epochs=epoch, alpha=alpha, omega=omega, lr=lr, exp_name=f"Exp_{trial+1}_{EXP}_{model.upper()}_{sch.upper()}_Lr_{str(lr)}_Epoch_{str(epoch)}_alpha_{str(alpha)}_omega_{str(omega)}", rebuild=False, KD_variant=variant)
 
                         results.append({
                                 "Trial": trial + 1,
