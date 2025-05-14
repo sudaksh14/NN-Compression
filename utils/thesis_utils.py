@@ -118,8 +118,8 @@ def KD_LW_trainer(
     student_channels,
     teacher_channels,
     num_epochs=20,
-    exp_name="KD LW",
-    KD_variant="layer_wise",
+    exp_name="KD_LW",
+    KD_variant="layerwise",
 ):
     teacher = teacher.to(device)
     student = student.to(device)
@@ -161,7 +161,7 @@ def KD_LW_trainer(
 
     if KD_variant == "hints":
         train_hint_losses = []
-    elif KD_variant == "layer-wise":
+    elif KD_variant == "layerwise":
         train_layer_wise_losses = []
     else:
         train_distillation_losses = []
@@ -180,14 +180,23 @@ def KD_LW_trainer(
             inputs, labels = inputs.to(device), labels.to(device)
 
             optimizer.zero_grad()
-
+            
             # Forward pass
-            student_outputs, inter_student1, inter_student2, inter_student3 = student(
-                inputs
-            )
-            with torch.no_grad():
-                teacher_outputs, inter_teacher1, inter_teacher2, inter_teacher3 = (
-                    teacher(inputs)
+            if KD_variant == "layerwise":
+                student_outputs, inter_student1, inter_student2, inter_student3 = student(
+                    inputs
+                )
+                with torch.no_grad():
+                    teacher_outputs, inter_teacher1, inter_teacher2, inter_teacher3 = (
+                        teacher(inputs)
+                    )
+            elif KD_variant == "hints":
+                student_outputs, inter_student1, inter_student2, inter_student3 = student(
+                    inputs
+                )
+                with torch.no_grad():
+                    teacher_outputs, inter_teacher1, inter_teacher2, inter_teacher3 = (
+                        teacher(inputs)
                 )
 
             # Compute losses

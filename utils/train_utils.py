@@ -860,7 +860,7 @@ def train_student_with_layerwise(
     return train_avg_loss, train_avg_layer_loss, train_accuracy, val_avg_loss, val_accuracy
 
 
-def KD_trainer(student, teacher, train_loader, val_loader, teacher_channels, student_channels, lr, alpha, beta, num_epochs=20, exp_name="KD", KD_variant="hints"):
+def KD_trainer(student, teacher, train_loader, val_loader, teacher_channels, student_channels, lr, alpha, beta, omega, num_epochs=20, exp_name="KD", KD_variant="hints"):
     train_losses = []
     if KD_variant == "hints":
         train_hint_losses = []
@@ -875,10 +875,10 @@ def KD_trainer(student, teacher, train_loader, val_loader, teacher_channels, stu
     for epoch in range(num_epochs):
         if KD_variant == "hints":
             train_avg_loss, train_avg_hint_loss, train_accuracy, val_avg_loss, val_accuracy = train_student_with_hints(
-                student, teacher, train_loader, val_loader, teacher_channels, student_channels, lr)
+                student, teacher, train_loader, val_loader, teacher_channels, student_channels, lr, alpha)
         elif KD_variant == "layerwise":
             train_avg_loss, train_avg_layerwise_loss, train_accuracy, val_avg_loss, val_accuracy = train_student_with_layerwise(
-                student, teacher, train_loader, val_loader, teacher_channels, student_channels, num_epochs, lr)
+                student, teacher, train_loader, val_loader, teacher_channels, student_channels, num_epochs, lr, alpha, beta, omega)
         else:
             train_avg_loss, train_avg_distillation_loss, train_accuracy, val_avg_loss, val_accuracy = train_student_with_distillation(
                 student, teacher, train_loader, val_loader, lr, alpha, beta)

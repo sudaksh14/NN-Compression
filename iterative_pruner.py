@@ -210,26 +210,51 @@ print(f"Number of Test samples: {len(test_dataset)}")
 #         return accuracy_list, profiling
 
 
-def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3, 0.3, 0.3], model_name="Resnet18", epochs=20, lr=1e-3, optim="adam", exp_name="ToyExp_Global_Iter_Adaptivity_Resnet20", rebuild=True):
+def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_ratio=[0.3, 0.3, 0.3], model_name="Resnet18", epochs=20, lr=1e-3, alpha=0.75, omega=0.4, optim="adam", exp_name="ToyExp_Global_Iter_Adaptivity_Resnet20", rebuild=True, KD_variant="layerwise", device=device):
 
     assert prune_steps == len(prune_ratio), f"Expected Prune steps ({prune_steps}) to match the length of prune ratios ({len(prune_ratio)})."
 
     if "Resnet" in model_name:
-        original_model = torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_resnet20", pretrained=True).to(device)
+        if KD_variant == "layerwise":
+            original_model = Resnet_General(
+                channel_dict=None, KD=True, pre_train=True, layerwise=True
+            ).to(device)
+            original_model.load_state_dict(
+                torch.load(
+                    "./pre-trained/resnet18_pre-trained_cifar10.pt", weights_only=True
+                ),
+                # torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_resnet20", pretrained=True),
+                strict=False,
+            )
+        elif KD_variant == "hints":
+            original_model = Resnet_General(channel_dict=None, KD=True, pre_train=True).to(
+                device
+            )
+            original_model.load_state_dict(
+                torch.load(
+                    "./pre-trained/resnet18_pre-trained_cifar10.pt", weights_only=True
+                ),
+                strict=False,
+            )
+        else:
+            original_model = torch.hub.load(
+                "chenyaofo/pytorch-cifar-models", "cifar10_resnet20", pretrained=True
+            ).to(device)
     elif "VGG" in model_name:
         original_model = torch.hub.load("chenyaofo/pytorch-cifar-models", "cifar10_vgg16_bn", pretrained=True).to(device)
         optim = "SGD"
 
     accuracy_list = []
-    profiling = {"params":[], "MAC's":[], "model_size":[]}#, "latency":[]}
+    profiling = {"params":[], "MAC's":[], "model_size":[]}
 
     print(f"{'-'*20}Starting with Experiment {exp_name}{'-'*20}")
-    acc_original, f1_original, params_original, mac_original, size_mb_original = evaluate(original_model, test_loader, profiling=True)
+
+    acc_original, f1_original, params_original, mac_original, size_mb_original = evaluate(original_model, test_loader, profiling=True, KD=False, layerwise=True)
+
     accuracy_list.append(acc_original)
     profiling["params"].append(params_original)
     profiling["MAC's"].append(mac_original)
     profiling["model_size"].append(size_mb_original)
-    #profiling["latency"].append(latency_original)
 
     prune_meta_data = []
     unprune_meta_data = []
@@ -286,23 +311,122 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
 
     # Core Model Training
     if "Resnet" in model_name:
-        core_model = Resnet_General(unprune_meta_data[-1]["num_unpruned_channels"]).to(device)
+        if KD_variant == "layerwise":
+            core_model = Resnet_General(
+                unprune_meta_data[-1]["num_unpruned_channels"], KD=True, layerwise=True
+            ).to(device)
+        elif KD_variant == "hints":
+            core_model = Resnet_General(
+                unprune_meta_data[-1]["num_unpruned_channels"], KD=True
+            ).to(device)
+        elif KD_variant == "regular":
+            core_model = Resnet_General(
+                unprune_meta_data[-1]["num_unpruned_channels"], KD=True
+            ).to(device)
+        else:
+            core_model = Resnet_General(unprune_meta_data[-1]["num_unpruned_channels"]).to(
+                device
+            )
     elif "VGG" in model_name:
         core_model = VGG_General(unprune_meta_data[-1]["num_unpruned_channels"]).to(device)
     copy_weights_from_dict(core_model, unprune_meta_data[-1]["unpruned_weights"], BN_data[-1]["BN_params"], BN=True)
-
-
-    fine_tuner(core_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_core_model_Level-{str(prune_steps+1)}", LR=lr)
-    KD_trainer()
+    # copy_weights_from_dict(
+    #     core_model, unprune_meta_data[-1]["unpruned_weights"], None, False
+    # )
+    
+    # fine_tuner(core_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_core_model_Level-{str(prune_steps+1)}", LR=lr)
+    # KD_trainer()
     # fine_tuner_BN(core_model, train_loader, val_loader, num_epochs=epochs, num_epochs_BN=10, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_core_model_Level-{str(prune_steps+1)}", LR=lr)
-    acc_pruned, f1_pruned, params_core, mac_core, size_mb_core = evaluate(core_model, test_loader, profiling=True)
+    #acc_pruned, f1_pruned, params_core, mac_core, size_mb_core = evaluate(core_model, test_loader, profiling=True)
     # torch.onnx.export(core_model, (torch.randn(1, 3, 32, 32).to(device),), f=f"./saves/onnx/{model_name}_Core_Model.onnx")
+    
+    if KD_variant == "layerwise":
+        KD_trainer(
+            student=core_model,
+            teacher=orig_copy,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            teacher_channels=[16, 32, 64],
+            student_channels=[
+                unprune_meta_data[-1]["num_unpruned_channels"]["layer1.2.conv2"][0],
+                unprune_meta_data[-1]["num_unpruned_channels"]["layer2.2.conv2"][0],
+                unprune_meta_data[-1]["num_unpruned_channels"]["layer3.2.conv2"][0],
+            ],
+            lr=lr,
+            omega=omega,
+            alpha=alpha,
+            beta=3,
+            num_epochs=epochs,
+            exp_name=exp_name,
+            KD_variant="layerwise",
+            device=device,
+        )
+    elif KD_variant == "hints":
+        KD_trainer(
+            student=core_model,
+            teacher=orig_copy,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            teacher_channels=64,
+            student_channels=unprune_meta_data[-1]["num_unpruned_channels"]["layer1.2.conv2"][0],
+            lr=lr,
+            omega=omega,
+            alpha=alpha,
+            beta=3,
+            num_epochs=epochs,
+            exp_name=exp_name,
+            KD_variant="hints",
+            device=device,
+        )
+    elif KD_variant == "regular":
+        KD_trainer(
+            student=core_model,
+            teacher=orig_copy,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            teacher_channels=None,
+            student_channels=None
+            lr=lr,
+            omega=omega,
+            alpha=alpha,
+            beta=3,
+            num_epochs=epochs,
+            KD_variant="regular",
+            exp_name=exp_name,
+            device=device,
+        )
+    else:
+        fine_tuner(
+            core_model, 
+            train_loader, 
+            val_loader, 
+            num_epochs=epochs, 
+            optim_type="adam", 
+            scheduler_type=scheduler, 
+            prune_ratio=prune_ratio, 
+            exp_name=f"{exp_name}_Training_core_modelr", 
+            device=device,
+            LR=lr,
+        )
+        
+    if KD_variant == "layerwise":
+        acc_pruned, f1_pruned, params_core, mac_core, size_mb_core = evaluate(
+            core_model, test_loader, profiling=True, KD=False, layerwise=True
+        )
+    elif KD_variant == "hints" or KD_variant == "regular":
+        acc_pruned, f1_pruned, params_core, mac_core, size_mb_core = evaluate(
+            core_model, test_loader, profiling=True, KD=True, layerwise=False
+        )
+    else:
+        acc_pruned, f1_pruned, params_core, mac_core, size_mb_core = evaluate(
+            core_model, test_loader, profiling=True, KD=False, layerwise=False
+        )
+
     save_statedict(core_model, unprune_meta_data[-1]["num_unpruned_channels"], path=f"./saves/state_dicts/{exp_name}_{model_name}_Core_Model.pth")
     accuracy_list.append(acc_pruned)
     profiling["params"].append(params_core)
     profiling["MAC's"].append(mac_core)
     profiling["model_size"].append(size_mb_core)
-    #profiling["latency"].append(latency_core)
     model_summary_with_frozen_counts(core_model) 
 
     if rebuild:
@@ -321,8 +445,25 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
             model_summary_with_frozen_counts(rebuilt_model)
             
             # fine_tuner(rebuilt_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=lr)
-            fine_tuner_zerograd(rebuilt_model, train_loader, val_loader, freeze_dim0, freeze_dim1, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=lr)
-            # KD_trainer_zerograd(teacher=orig_copy, student=rebuilt_model, train_loader=train_loader, val_loader=val_loader, lr=lr, alpha=0.75, beta=3, freeze_dim0=freeze_dim0, freeze_dim1=freeze_dim1, num_epochs=epochs, exp_name=f"{exp_name}_Training_model_Level-{i+1}", zero_out_grad=True)
+            # fine_tuner_zerograd(rebuilt_model, train_loader, val_loader, freeze_dim0, freeze_dim1, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=lr)
+            KD_trainer(
+                student=rebuilt_model, 
+                teacher=orig_copy, 
+                train_loader=train_loader, 
+                val_loader=val_loader, 
+                teacher_channels=[16, 32, 64], 
+                student_channels=[
+                    unprune_meta_data[-1]["num_unpruned_channels"]["layer1.2.conv2"][0],
+                    unprune_meta_data[-1]["num_unpruned_channels"]["layer2.2.conv2"][0],
+                    unprune_meta_data[-1]["num_unpruned_channels"]["layer3.2.conv2"][0],
+                ], 
+                lr=lr, 
+                alpha=0.75, 
+                beta=3, 
+                num_epochs=epochs, 
+                exp_name=f"{exp_name}_Training_model_Level-{i+1}", 
+                KD_variant="layerwise"
+            )
             # fine_tuner_BN(rebuilt_model, train_loader, val_loader, num_epochs=epochs, num_epochs_BN=10, optim_type=optim, scheduler_type=scheduler, 
             #               exp_name=f"{exp_name}_Training_model_Level-{i+1}", pruned_indices=prune_meta_data[i]["zero_channels_info"], unpruned_indices=unprune_meta_data[i]["non_zero_channels_info"], unpruned_weights=unprune_meta_data[i]["unpruned_weights"], LR=lr)
             acc_rebuilt, f1_rebuilt, params_rebuilt, mac_rebuilt, size_mb_rebuilt = evaluate(rebuilt_model, test_loader, profiling=True)
@@ -347,13 +488,14 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
             
 
         return accuracy_list, profiling
+
+    return accuracy_list, profiling
                 
 
 def compare_weights():
 
         path_core = "./saves/state_dicts/Exp_1_ToyExp_Iter_adaptivity_VGG16_COSINE_0.001_2_VGG16_Core_Model.pth"
         path_level3 = "./saves/state_dicts/Exp_1_ToyExp_Iter_adaptivity_VGG16_COSINE_0.001_2_VGG16_Descendant_Model_Level-3.pth"
-
 
         loaded_data_core = torch.load(path_core, map_location=device)
         loaded_data_level3 = torch.load(path_level3, map_location=device)
@@ -385,59 +527,45 @@ def compare_weights():
   
 
 if __name__ == '__main__':
-
-    # compare_weights()
-    # exit()
-    
-    # schedulers = ['cosine', 'step', 'exponential', 'cyclic', 'Default']
-    # lrs = [1e-2, 1e-3, 1e-4, 1e-5]
-    # epochs = [20, 50, 100, 200]
-    # model_name = ["Resnet18", "VGG16"]
-
-    # Experiment 1: Iterative Adaptivity with Resnet18
-    schedulers = ['cosine', 'step', 'exponential', 'cyclic', 'Default']
-    lrs = [1e-3]
-    epochs = [2]
-    model_name = ["Resnet18"]
-    # alphas = [0, 0.25, 0.5]
+    sch = 'cosine'
+    lrs = [1e-2, 1e-3, 1e-4, 1e-5]
+    epochs = [1, 20, 50, 100]
+    model = "Resnet20"
+    alphas = [0, 0.25, 0.5, 0.75, 1.0]
+    omegas = [0, 0.25, 0.5, 0.75, 1.0]
+    variants = ["layerwise", "hints", "regular", "no_kd"]
 
     results = []
     trial = 0
-    EXP = "Restore&Update_BN_Iter_adaptivity"
-    sch = 'cosine'
+    EXP = "Layerwise_KD"
 
-    # for sch in schedulers:
     for lr in lrs:
         for epoch in epochs:
-            for model in model_name:
-                # for alpha in alphas:
-                
-                # test_acc, profiling = iterative_filter_pruning(scheduler=sch, model_name=model, epochs=epoch, lr=lr, alpha=alpha, optim="adam", exp_name=f"Exp_{trial+1}_{EXP}_{model.upper()}_{sch.upper()}_{str(lr)}_{str(epoch)}_{str(alpha)}", KD=True)
-                # test_acc, profiling = Global_iterative_filter_pruning(scheduler=sch, prune_steps=1, prune_ratio=[0.5], model_name=model, epochs=epoch, lr=lr, optim="SGD", exp_name=f"Exp_{trial+1}_{EXP}_{model.upper()}_{sch.upper()}_{str(lr)}_{str(epoch)}")
-                test_acc, profiling = Global_iterative_filter_pruning(scheduler=sch, model_name=model, epochs=epoch, lr=lr, exp_name=f"Exp_{trial+1}_{EXP}_{model.upper()}_{sch.upper()}_{str(lr)}_{str(epoch)}")
-                # test_acc, profiling = Global_iterative_filter_pruning(scheduler=sch, model_name=model, epochs=epoch, lr=lr, optim="SGD", exp_name=f"Exp_{trial+1}_{EXP}_{model.upper()}_{sch.upper()}_{str(lr)}_{str(epoch)}")
-                
-                results.append({
-                        "Trial": trial + 1,
-                        "Learning Rate": lr,
-                        "Epochs": epoch,
-                        "Scheduler": sch.upper(),
-                        "Test Accuracy (Original)": test_acc[0],
-                        "Test Accuracy (Core Model)": test_acc[1],
-                        "Test Accuracy (Descendant Models)": test_acc[2:],
-                        "Num_Params": profiling["params"],
-                        "MAC's": profiling["MAC's"],
-                        "Model Size (MB)": profiling["model_size"],
-                        #"Latency": profiling["latency"]
-                        })
-                
-                results_df = pd.DataFrame(results)
-                result_path = f"./saves/Results/Exp_{EXP}_{model.upper()}_results.csv"
-                if os.path.exists(result_path):
-                    results_df.to_csv(result_path, mode='a', header=False, index=False)
-                else:
-                    results_df.to_csv(result_path, index=False)
-                trial += 1
+            for alpha in alphas:
+                for omega in omegas:
+                    for variant in variants:
+                        test_acc, profiling = Global_iterative_filter_pruning(scheduler=sch, prune_steps=1, prune_ratio=0.3, model_name=model, epochs=epoch, alpha=alpha, omega=omega, lr=lr, exp_name=f"Exp_{trial+1}_{EXP}_{model.upper()}_{sch.upper()}_Lr_{str(lr)}_Epoch_{str(epoch)}_alpha_{str(alpha)}_omega_{str(omega)}", rebuild=False, KD_variant=variant, device=device)
+
+                        results.append({
+                                "Trial": trial + 1,
+                                "Learning Rate": lr,
+                                "Epochs": epoch,
+                                "Scheduler": sch.upper(),
+                                "Test Accuracy (Original)": test_acc[0],
+                                "Test Accuracy (Core Model)": test_acc[1],
+                                "Test Accuracy (Descendant Models)": test_acc[2:],
+                                "Num_Params": profiling["params"],
+                                "MAC's": profiling["MAC's"],
+                                "Model Size (MB)": profiling["model_size"],
+                                })
+
+                        results_df = pd.DataFrame(results)
+                        result_path = f"./saves/Results/Exp_{EXP}_{model.upper()}_results.csv"
+                        if os.path.exists(result_path):
+                            results_df.to_csv(result_path, mode='a', header=False, index=False)
+                        else:
+                            results_df.to_csv(result_path, index=False)
+                        trial += 1
     
     print(f"{'-'*20}EXPERIMENT FINISHED{'-'*20}")
     exit()
