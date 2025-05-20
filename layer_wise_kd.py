@@ -200,39 +200,39 @@ def iterative_filter_pruning(
     #     KD_variant="hints",
     # )
 
-    KD_LW_trainer(
-        student=core_model,
-        teacher=orig_copy,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        teacher_channels=[16, 32, 64],
-        student_channels=[
-            unprune_meta_data[-1]["num_unpruned_channels"]["layer1.2.conv2"][0],
-            unprune_meta_data[-1]["num_unpruned_channels"]["layer2.2.conv2"][0],
-            unprune_meta_data[-1]["num_unpruned_channels"]["layer3.2.conv2"][0],
-        ],
-        lr=lr,
-        omega=0.6,
-        alpha=0.75,
-        beta=3,
-        num_epochs=epochs,
-    )
+    # KD_LW_trainer(
+    #     student=core_model,
+    #     teacher=orig_copy,
+    #     train_loader=train_loader,
+    #     val_loader=val_loader,
+    #     teacher_channels=[16, 32, 64],
+    #     student_channels=[
+    #         unprune_meta_data[-1]["num_unpruned_channels"]["layer1.2.conv2"][0],
+    #         unprune_meta_data[-1]["num_unpruned_channels"]["layer2.2.conv2"][0],
+    #         unprune_meta_data[-1]["num_unpruned_channels"]["layer3.2.conv2"][0],
+    #     ],
+    #     lr=lr,
+    #     omega=0.6,
+    #     alpha=0.75,
+    #     beta=3,
+    #     num_epochs=epochs,
+    # )
 
-    acc_pruned, f1_pruned, params_core, mac_core, size_mb_core = evaluate(
-        core_model, test_loader, profiling=True, KD=False, layerwise=True
-    )
+    # acc_pruned, f1_pruned, params_core, mac_core, size_mb_core = evaluate(
+    #     core_model, test_loader, profiling=True, KD=False, layerwise=True
+    # )
 
-    save_statedict(
-        core_model,
-        unprune_meta_data[-1]["num_unpruned_channels"],
-        path=f"./saves/state_dicts/{exp_name}_ResNet18_Core_Model.pth",
-    )
-    accuracy_list.append(acc_pruned)
-    profiling["params"].append(params_core)
-    profiling["MAC's"].append(mac_core)
-    profiling["model_size"].append(size_mb_core)
+    # save_statedict(
+    #     core_model,
+    #     unprune_meta_data[-1]["num_unpruned_channels"],
+    #     path=f"./saves/state_dicts/{exp_name}_ResNet18_Core_Model.pth",
+    # )
+    # accuracy_list.append(acc_pruned)
+    # profiling["params"].append(params_core)
+    # profiling["MAC's"].append(mac_core)
+    # profiling["model_size"].append(size_mb_core)
 
-    return accuracy_list, profiling
+    # return accuracy_list, profiling
 
 
 if __name__ == "__main__":

@@ -330,10 +330,12 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
             )
     elif "VGG" in model_name:
         core_model = VGG_General(unprune_meta_data[-1]["num_unpruned_channels"]).to(device)
-    copy_weights_from_dict(core_model, unprune_meta_data[-1]["unpruned_weights"], BN_data[-1]["BN_params"], BN=True)
-    # copy_weights_from_dict(
-    #     core_model, unprune_meta_data[-1]["unpruned_weights"], None, False
-    # )
+
+    # copy_weights_from_dict(core_model, unprune_meta_data[-1]["unpruned_weights"], BN_data[-1]["BN_params"], BN=True)
+
+    copy_weights_from_dict(
+        core_model, unprune_meta_data[-1]["unpruned_weights"], None, False
+    )
     
     # fine_tuner(core_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_core_model_Level-{str(prune_steps+1)}", LR=lr)
     # KD_trainer()
@@ -368,7 +370,7 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
             train_loader=train_loader,
             val_loader=val_loader,
             teacher_channels=64,
-            student_channels=unprune_meta_data[-1]["num_unpruned_channels"]["layer1.2.conv2"][0],
+            student_channels=unprune_meta_data[-1]["num_unpruned_channels"]["layer3.2.conv2"][0],
             lr=lr,
             omega=omega,
             alpha=alpha,
@@ -385,7 +387,6 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
             num_epochs=epochs, 
             optim_type="adam", 
             scheduler_type=scheduler, 
-            prune_ratio=prune_ratio, 
             exp_name=f"{exp_name}_Training_core_modelr", 
             LR=lr,
         )
@@ -509,11 +510,11 @@ def compare_weights():
 
 if __name__ == '__main__':
     sch = 'cosine'
-    lrs = [1e-2, 1e-3, 1e-4, 1e-5]
-    epochs = [1, 20, 50, 100]
+    lrs = [1e-3]#1e-2, 1e-3, 1e-4, 1e-5]
+    epochs = [1]#, 20, 50, 100]
     model = "Resnet20"
-    alphas = [0, 0.25, 0.5, 0.75]
-    omegas = [0, 0.25, 0.5, 0.75]
+    alphas = [0.25]#0, 0.25, 0.5, 0.75]
+    omegas = [0.25]#0, 0.25, 0.5, 0.75]
     variants = ["layerwise", "hints", "no_kd"]
 
     results = []
@@ -528,6 +529,7 @@ if __name__ == '__main__':
                         test_acc, profiling = Global_iterative_filter_pruning(scheduler=sch, prune_steps=1, prune_ratio=[0.3], model_name=model, epochs=epoch, alpha=alpha, omega=omega, lr=lr, exp_name=f"Exp_{trial+1}_{EXP}_{model.upper()}_{sch.upper()}_Lr_{str(lr)}_Epoch_{str(epoch)}_alpha_{str(alpha)}_omega_{str(omega)}", rebuild=False, KD_variant=variant)
 
                         results.append({
+                                "Variant": variant,
                                 "Trial": trial + 1,
                                 "Learning Rate": lr,
                                 "Epochs": epoch,
