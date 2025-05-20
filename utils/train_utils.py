@@ -813,10 +813,6 @@ def train_student_with_layerwise(
         )
 
         # Backward pass
-        loss.backward()
-        optimizer.step()
-
-        # Backward pass
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
