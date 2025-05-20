@@ -510,11 +510,11 @@ def compare_weights():
 
 if __name__ == '__main__':
     sch = 'cosine'
-    lrs = [1e-3]#1e-2, 1e-3, 1e-4, 1e-5]
-    epochs = [1]#, 20, 50, 100]
+    lrs = [1e-2, 1e-3, 1e-4, 1e-5]
+    epochs = [20, 50, 100]
     model = "Resnet20"
-    alphas = [0.25]#0, 0.25, 0.5, 0.75]
-    omegas = [0.25]#0, 0.25, 0.5, 0.75]
+    alphas = [0, 0.25, 0.5, 0.75]
+    omegas = [0, 0.25, 0.5, 0.75]
     variants = ["layerwise", "hints", "no_kd"]
 
     results = []
