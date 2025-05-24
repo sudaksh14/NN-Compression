@@ -379,6 +379,22 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
             exp_name=exp_name,
             KD_variant="hints",
         )
+    elif KD_variant == "distill":
+        KD_trainer(
+            student=core_model,
+            teacher=orig_copy,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            teacher_channels=64,
+            student_channels=unprune_meta_data[-1]["num_unpruned_channels"]["layer3.2.conv2"][0],
+            lr=lr,
+            omega=omega,
+            alpha=alpha,
+            beta=3,
+            num_epochs=epochs,
+            exp_name=exp_name,
+            KD_variant="distill",
+        )
     else:
         fine_tuner(
             core_model, 
@@ -515,7 +531,7 @@ if __name__ == '__main__':
     model = "Resnet20"
     alphas = [0, 0.25, 0.5, 0.75]
     omegas = [0, 0.25, 0.5, 0.75]
-    variants = ["layerwise", "hints", "no_kd"]
+    variants = ["layerwise", "hints", "no_kd"] #, "distill"]
 
     results = []
     trial = 0
