@@ -16,7 +16,13 @@ from models.VGG import *
 from copy import deepcopy
 from tqdm import tqdm
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+if torch.cuda.is_available():
+    device = torch.device("cuda")
+elif torch.backends.mps.is_available():
+    device = torch.device("mps")
+else:
+    device = torch.device("cpu")
 print("Running on device:", device)
 
 torch.manual_seed(42)

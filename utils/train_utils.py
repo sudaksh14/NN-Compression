@@ -14,7 +14,12 @@ from tqdm import tqdm
 from utils.prune_utils import replace_previous_weights, zero_out_gradients_v2
 
 # Set device for training and evaluation
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+if torch.cuda.is_available():
+    device = torch.device("cuda")
+elif torch.backends.mps.is_available():
+    device = torch.device("mps")
+else:
+    device = torch.device("cpu")
 print("Running on device:", device)
 
 ia.seed(1)  # Set seed for reproducibility
@@ -605,7 +610,7 @@ def train_accuracy(model, train_loader, device):
     return 100 * correct / total
 
 
-def train_student_with_hints(student, teacher, train_loader, val_loader, teacher_channels, student_channels, lr=0.001, alpha=0.75):
+def train_student_with_hints(student, teacher, train_loader, val_loader, teacher_channels, student_channels, lr=0.001, alpha=0.75, zerograd=False, freeze_dim0=None, freeze_dim1=None):
     teacher = teacher.to(device).eval()
     student = student.to(device).train()
 
@@ -638,6 +643,8 @@ def train_student_with_hints(student, teacher, train_loader, val_loader, teacher
         # Backward pass
         optimizer.zero_grad()
         loss.backward()
+        if zerograd:
+            zero_out_gradients_v2(student, freeze_dim0, freeze_dim1)
         optimizer.step()
 
         # Update train metrics
@@ -679,7 +686,7 @@ def train_student_with_hints(student, teacher, train_loader, val_loader, teacher
 
 
 
-def train_student_with_distillation(student, teacher, train_loader, val_loader, lr=0.001, alpha=0.75, beta=3):
+def train_student_with_distillation(student, teacher, train_loader, val_loader, lr=0.001, alpha=0.75, beta=3, zerograd=False, freeze_dim0=None, freeze_dim1=None):
     teacher = teacher.to(device).eval()
     student = student.to(device).train()
 
@@ -712,6 +719,8 @@ def train_student_with_distillation(student, teacher, train_loader, val_loader, 
         # Backward pass
         optimizer.zero_grad()
         loss.backward()
+        if zerograd:
+            zero_out_gradients_v2(student, freeze_dim0, freeze_dim1)
         optimizer.step()
 
         # Update train metrics
@@ -764,12 +773,14 @@ def train_student_with_layerwise(
         alpha=0.75, 
         beta=3, 
         omega=0.6, 
+        zerograd=False,
+        freeze_dim0=None,
+        freeze_dim1=None,
     ):
     teacher = teacher.to(device).eval()
     student = student.to(device).train()
 
     # Initialize the transformation layer
-
     transformation_layers = [
         TransformationLayer(student_ch, teacher_ch).to(device) for student_ch, teacher_ch in zip(student_channels, teacher_channels)
     ]
@@ -815,6 +826,8 @@ def train_student_with_layerwise(
         # Backward pass
         optimizer.zero_grad()
         loss.backward()
+        if zerograd:
+            zero_out_gradients_v2(student, freeze_dim0, freeze_dim1)
         optimizer.step()
 
         # Update train metrics
@@ -855,7 +868,7 @@ def train_student_with_layerwise(
     return train_avg_loss, train_avg_layer_loss, train_accuracy, val_avg_loss, val_accuracy
 
 
-def KD_trainer(student, teacher, train_loader, val_loader, teacher_channels, student_channels, lr, alpha, beta, omega, num_epochs=20, exp_name="KD", KD_variant="hints", device=device):
+def KD_trainer(student, teacher, train_loader, val_loader, teacher_channels, student_channels, lr, alpha, beta, omega, num_epochs=20, exp_name="KD", KD_variant="hints", device=device, zerograd=False, freeze_dim0=None, freeze_dim1=None):
     train_losses = []
     if KD_variant == "hints":
         train_hint_losses = []
@@ -870,13 +883,13 @@ def KD_trainer(student, teacher, train_loader, val_loader, teacher_channels, stu
     for epoch in range(num_epochs):
         if KD_variant == "hints":
             train_avg_loss, train_avg_hint_loss, train_accuracy, val_avg_loss, val_accuracy = train_student_with_hints(
-                student, teacher, train_loader, val_loader, teacher_channels, student_channels, lr, alpha)
+                student, teacher, train_loader, val_loader, teacher_channels, student_channels, lr, alpha, zerograd, freeze_dim0, freeze_dim1)
         elif KD_variant == "layerwise":
             train_avg_loss, train_avg_layerwise_loss, train_accuracy, val_avg_loss, val_accuracy = train_student_with_layerwise(
-                student, teacher, train_loader, val_loader, teacher_channels, student_channels, num_epochs, lr, alpha, beta, omega)
+                student, teacher, train_loader, val_loader, teacher_channels, student_channels, num_epochs, lr, alpha, beta, omega, zerograd, freeze_dim0, freeze_dim1)
         else:
             train_avg_loss, train_avg_distillation_loss, train_accuracy, val_avg_loss, val_accuracy = train_student_with_distillation(
-                student, teacher, train_loader, val_loader, lr, alpha, beta)
+                student, teacher, train_loader, val_loader, lr, alpha, beta, zerograd, freeze_dim0, freeze_dim1)
 
         train_losses.append(train_avg_loss)
         if KD_variant == "hints":

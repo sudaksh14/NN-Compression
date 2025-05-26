@@ -19,7 +19,12 @@ from deepspeed.profiling.flops_profiler import get_model_profile, FlopsProfiler
 from torchsummary import summary
 
 # Set device for training and evaluation
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+if torch.cuda.is_available():
+    device = torch.device("cuda")
+elif torch.backends.mps.is_available():
+    device = torch.device("mps")
+else:
+    device = torch.device("cpu")
 print("Running on device:", device)
 
 def evaluate(model, data_loader, plot_title="Test Accuracy & F1-Score", device=device, plot=False, profiling=False, KD=False, layerwise=False):

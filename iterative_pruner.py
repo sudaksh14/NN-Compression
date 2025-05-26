@@ -25,7 +25,12 @@ from openpyxl import load_workbook
 
 
 # Set device for training and evaluation
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+if torch.cuda.is_available():
+    device = torch.device("cuda")
+elif torch.backends.mps.is_available():
+    device = torch.device("mps")
+else:
+    device = torch.device("cpu")
 print("Running on device:", device)
 
 torch.manual_seed(42)
@@ -429,10 +434,23 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
 
     if rebuild:
         for i in range(prune_steps-1, -1, -1):
+            print(i)
             print(f"{'-'*20}Rebuilding Descendant Model Level-{i+1}{'-'*20}")
             new_channels = get_rebuild_channels(unprune_meta_data[i]["num_unpruned_channels"], prune_meta_data[i]["num_pruned_channels"])
             if "Resnet" in model_name:
-                rebuilt_model = Resnet_General(new_channels).to(device)
+                # rebuilt_model = Resnet_General(new_channels).to(device)
+                if KD_variant == "layerwise":
+                    rebuilt_model = Resnet_General(
+                        new_channels, KD=True, layerwise=True
+                    ).to(device)
+                elif KD_variant == "hints":
+                    rebuilt_model = Resnet_General(
+                        new_channels, KD=True
+                    ).to(device)
+                else:
+                    rebuilt_model = Resnet_General(new_channels).to(
+                        device
+                    )
             elif "VGG" in model_name:
                 rebuilt_model = VGG_General(new_channels).to(device)
             get_core_weights(core_model, unprune_meta_data[i]["unpruned_weights"], BN_data[i+1]["BN_params"], restore_BN=True)
@@ -443,29 +461,152 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
             model_summary_with_frozen_counts(rebuilt_model)
             
             # fine_tuner(rebuilt_model, train_loader, val_loader, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=lr)
-            # fine_tuner_zerograd(rebuilt_model, train_loader, val_loader, freeze_dim0, freeze_dim1, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=lr)
-            KD_trainer(
-                student=rebuilt_model, 
-                teacher=orig_copy, 
-                train_loader=train_loader, 
-                val_loader=val_loader, 
-                teacher_channels=[16, 32, 64], 
-                student_channels=[
-                    unprune_meta_data[-1]["num_unpruned_channels"]["layer1.2.conv2"][0],
-                    unprune_meta_data[-1]["num_unpruned_channels"]["layer2.2.conv2"][0],
-                    unprune_meta_data[-1]["num_unpruned_channels"]["layer3.2.conv2"][0],
-                ], 
-                lr=lr, 
-                alpha=0.75, 
-                omega=omega,
-                beta=3, 
-                num_epochs=epochs, 
-                exp_name=f"{exp_name}_Training_model_Level-{i+1}", 
-                KD_variant="layerwise"
-            )
+            
+            # The last step requires KD between the teacher and student model when they're the same size so this data is not in unprune meta data.
+            if i == 0:
+                if KD_variant == "layerwise":
+                    # 16 REBUILDING STEP 3
+                    # print(unprune_meta_data[0]["num_unpruned_channels"]["layer1.2.conv2"][0]) # 13 REBUILDING STEP 2
+                    # print(unprune_meta_data[1]["num_unpruned_channels"]["layer1.2.conv2"][0]) # 11 REBUILDING STEP 1
+                    # print(unprune_meta_data[2]["num_unpruned_channels"]["layer1.2.conv2"][0]) # 9 CORE
+                    KD_trainer(
+                        student=rebuilt_model,
+                        teacher=orig_copy,
+                        train_loader=train_loader,
+                        val_loader=val_loader,
+                        teacher_channels=[16, 32, 64],
+                        student_channels=[16, 32, 64],
+                        lr=lr,
+                        omega=omega,
+                        alpha=alpha,
+                        beta=3,
+                        num_epochs=epochs,
+                        exp_name=exp_name,
+                        KD_variant="layerwise",
+                        zerograd=True,
+                        freeze_dim0=freeze_dim0,
+                        freeze_dim1=freeze_dim1,
+                    )
+                elif KD_variant == "hints":
+                    KD_trainer(
+                        student=rebuilt_model,
+                        teacher=orig_copy,
+                        train_loader=train_loader,
+                        val_loader=val_loader,
+                        teacher_channels=64,
+                        student_channels=64,
+                        lr=lr,
+                        omega=omega,
+                        alpha=alpha,
+                        beta=3,
+                        num_epochs=epochs,
+                        exp_name=exp_name,
+                        KD_variant="hints",
+                        zerograd=True,
+                        freeze_dim0=freeze_dim0,
+                        freeze_dim1=freeze_dim1,
+                    )
+                elif KD_variant == "distill":
+                    KD_trainer(
+                        student=rebuilt_model,
+                        teacher=orig_copy,
+                        train_loader=train_loader,
+                        val_loader=val_loader,
+                        teacher_channels=None,
+                        student_channels=None,
+                        lr=lr,
+                        omega=omega,
+                        alpha=alpha,
+                        beta=3,
+                        num_epochs=epochs,
+                        exp_name=exp_name,
+                        KD_variant="distill",
+                        zerograd=True,
+                        freeze_dim0=freeze_dim0,
+                        freeze_dim1=freeze_dim1,
+                    )
+                else:
+                    fine_tuner_zerograd(rebuilt_model, train_loader, val_loader, freeze_dim0, freeze_dim1, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=lr)
+            else:
+                if KD_variant == "layerwise":
+                    KD_trainer(
+                        student=rebuilt_model,
+                        teacher=orig_copy,
+                        train_loader=train_loader,
+                        val_loader=val_loader,
+                        teacher_channels=[16, 32, 64],
+                        student_channels=[
+                            unprune_meta_data[i-1]["num_unpruned_channels"]["layer1.2.conv2"][0], # Reduce one from i since you don't want to make a second core model
+                            unprune_meta_data[i-1]["num_unpruned_channels"]["layer2.2.conv2"][0],
+                            unprune_meta_data[i-1]["num_unpruned_channels"]["layer3.2.conv2"][0],
+                        ],
+                        lr=lr,
+                        omega=omega,
+                        alpha=alpha,
+                        beta=3,
+                        num_epochs=epochs,
+                        exp_name=exp_name,
+                        KD_variant="layerwise",
+                        zerograd=True,
+                        freeze_dim0=freeze_dim0,
+                        freeze_dim1=freeze_dim1,
+                    )
+                elif KD_variant == "hints":
+                    KD_trainer(
+                        student=rebuilt_model,
+                        teacher=orig_copy,
+                        train_loader=train_loader,
+                        val_loader=val_loader,
+                        teacher_channels=64,
+                        student_channels=unprune_meta_data[i-1]["num_unpruned_channels"]["layer3.2.conv2"][0],
+                        lr=lr,
+                        omega=omega,
+                        alpha=alpha,
+                        beta=3,
+                        num_epochs=epochs,
+                        exp_name=exp_name,
+                        KD_variant="hints",
+                        zerograd=True,
+                        freeze_dim0=freeze_dim0,
+                        freeze_dim1=freeze_dim1,
+                    )
+                elif KD_variant == "distill":
+                    KD_trainer(
+                        student=rebuilt_model,
+                        teacher=orig_copy,
+                        train_loader=train_loader,
+                        val_loader=val_loader,
+                        teacher_channels=None,
+                        student_channels=None,
+                        lr=lr,
+                        omega=omega,
+                        alpha=alpha,
+                        beta=3,
+                        num_epochs=epochs,
+                        exp_name=exp_name,
+                        KD_variant="distill",
+                        zerograd=True,
+                        freeze_dim0=freeze_dim0,
+                        freeze_dim1=freeze_dim1,
+                    )
+                else:
+                    fine_tuner_zerograd(rebuilt_model, train_loader, val_loader, freeze_dim0, freeze_dim1, num_epochs=epochs, optim_type=optim, scheduler_type=scheduler, exp_name=f"{exp_name}_Training_model_Level-{i+1}", LR=lr)
+
             # fine_tuner_BN(rebuilt_model, train_loader, val_loader, num_epochs=epochs, num_epochs_BN=10, optim_type=optim, scheduler_type=scheduler, 
             #               exp_name=f"{exp_name}_Training_model_Level-{i+1}", pruned_indices=prune_meta_data[i]["zero_channels_info"], unpruned_indices=unprune_meta_data[i]["non_zero_channels_info"], unpruned_weights=unprune_meta_data[i]["unpruned_weights"], LR=lr)
-            acc_rebuilt, _f1_rebuilt, params_rebuilt, mac_rebuilt, size_mb_rebuilt = evaluate(rebuilt_model, test_loader, profiling=True)
+            #acc_rebuilt, _f1_rebuilt, params_rebuilt, mac_rebuilt, size_mb_rebuilt = evaluate(rebuilt_model, test_loader, profiling=True)
+            if KD_variant == "layerwise":
+                acc_rebuilt, _f1_rebuilt, params_rebuilt, mac_rebuilt, size_mb_rebuilt = evaluate(
+                    rebuilt_model, test_loader, profiling=True, KD=False, layerwise=True
+                )
+            elif KD_variant == "hints":
+                acc_rebuilt, _f1_rebuilt, params_rebuilt, mac_rebuilt, size_mb_rebuilt = evaluate(
+                    rebuilt_model, test_loader, profiling=True, KD=True, layerwise=False
+                )
+            else:
+                acc_rebuilt, _f1_rebuilt, params_rebuilt, mac_rebuilt, size_mb_rebuilt = evaluate(
+                    rebuilt_model, test_loader, profiling=True, KD=False, layerwise=False
+                )
             # torch.onnx.export(rebuilt_model, (torch.randn(1, 3, 32, 32).to(device),), f=f"./saves/onnx/{model_name}_Descendant_Model_Level-{i+1}.onnx")
             save_statedict(rebuilt_model, new_channels, path=f"./saves/state_dicts/{exp_name}_{model_name}_Descendant_Model_Level-{i+1}.pth")
             core_model = rebuilt_model
@@ -491,7 +632,6 @@ def Global_iterative_filter_pruning(scheduler='cosine', prune_steps=3, prune_rat
                 
 
 def compare_weights():
-
         path_core = "./saves/state_dicts/Exp_1_ToyExp_Iter_adaptivity_VGG16_COSINE_0.001_2_VGG16_Core_Model.pth"
         path_level3 = "./saves/state_dicts/Exp_1_ToyExp_Iter_adaptivity_VGG16_COSINE_0.001_2_VGG16_Descendant_Model_Level-3.pth"
 
@@ -526,12 +666,10 @@ def compare_weights():
 
 if __name__ == '__main__':
     sch = 'cosine'
-    lrs = [1e-2, 1e-3, 1e-4, 1e-5]
-    epochs = [20, 50, 100]
+    lrs = [1e-3]
+    epochs = [1]
     model = "Resnet20"
-    alphas = [0, 0.25, 0.5, 0.75]
-    omegas = [0, 0.25, 0.5, 0.75]
-    variants = ["layerwise", "hints", "no_kd"] #, "distill"]
+    variants = ["layerwise", "hints", "no_kd", "distill"]
 
     results = []
     trial = 0
@@ -539,32 +677,30 @@ if __name__ == '__main__':
 
     for lr in lrs:
         for epoch in epochs:
-            for alpha in alphas:
-                for omega in omegas:
-                    for variant in variants:
-                        test_acc, profiling = Global_iterative_filter_pruning(scheduler=sch, prune_steps=1, prune_ratio=[0.3], model_name=model, epochs=epoch, alpha=alpha, omega=omega, lr=lr, exp_name=f"Exp_{trial+1}_{EXP}_{model.upper()}_{sch.upper()}_Lr_{str(lr)}_Epoch_{str(epoch)}_alpha_{str(alpha)}_omega_{str(omega)}", rebuild=False, KD_variant=variant)
+            for variant in variants:
+                test_acc, profiling = Global_iterative_filter_pruning(scheduler=sch, prune_steps=3, prune_ratio=[0.2, 0.2, 0.2], model_name=model, epochs=epoch, lr=lr, exp_name=f"Exp_{trial+1}_{EXP}_{model.upper()}_{sch.upper()}_Lr_{str(lr)}_Epoch_{str(epoch)}", rebuild=True, KD_variant=variant)
 
-                        results.append({
-                                "Variant": variant,
-                                "Trial": trial + 1,
-                                "Learning Rate": lr,
-                                "Epochs": epoch,
-                                "Scheduler": sch.upper(),
-                                "Test Accuracy (Original)": test_acc[0],
-                                "Test Accuracy (Core Model)": test_acc[1],
-                                "Test Accuracy (Descendant Models)": test_acc[2:],
-                                "Num_Params": profiling["params"],
-                                "MAC's": profiling["MAC's"],
-                                "Model Size (MB)": profiling["model_size"],
-                                })
+                results.append({
+                        "Variant": variant,
+                        "Trial": trial + 1,
+                        "Learning Rate": lr,
+                        "Epochs": epoch,
+                        "Scheduler": sch.upper(),
+                        "Test Accuracy (Original)": test_acc[0],
+                        "Test Accuracy (Core Model)": test_acc[1],
+                        "Test Accuracy (Descendant Models)": test_acc[2:],
+                        "Num_Params": profiling["params"],
+                        "MAC's": profiling["MAC's"],
+                        "Model Size (MB)": profiling["model_size"],
+                        })
 
-                        results_df = pd.DataFrame(results)
-                        result_path = f"./saves/Results/Exp_{EXP}_{model.upper()}_results.csv"
-                        if os.path.exists(result_path):
-                            results_df.to_csv(result_path, mode='a', header=False, index=False)
-                        else:
-                            results_df.to_csv(result_path, index=False)
-                        trial += 1
+                results_df = pd.DataFrame(results)
+                result_path = f"./saves/Results/Exp_{EXP}_{model.upper()}_results.csv"
+                if os.path.exists(result_path):
+                    results_df.to_csv(result_path, mode='a', header=False, index=False)
+                else:
+                    results_df.to_csv(result_path, index=False)
+                trial += 1
 
     print(f"{'-'*20}EXPERIMENT FINISHED{'-'*20}")
     exit()
