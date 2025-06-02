@@ -1,0 +1,31 @@
+[2025-06-02 16:03:57,864] [INFO] [real_accelerator.py:222:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+Running on device: cuda
+Running on device: cuda
+Running on device: cuda
+Running on device: cuda
+Files already downloaded and verified
+Files already downloaded and verified
+Data Augmentation applied:  True
+Number of Train samples: 45000
+Number of Val samples: 5000
+Number of Test samples: 10000
+--------------------Starting with Experiment Exp_1_hyperparameter_search_RESNET20_COSINE_Lr_0.001_Epoch_100_variant_layerwise_alpha_0.1_omega_0.1--------------------
+Accuracy: 0.3806, F1-Score: 0.3538
+[2025-06-02 16:04:05,466] [INFO] [profiler.py:1254:get_model_profile] Flops profiler warming-up...
+[2025-06-02 16:04:05,483] [INFO] [profiler.py:82:start_profile] Flops profiler started
+[2025-06-02 16:04:05,500] [INFO] [profiler.py:230:end_profile] Flops profiler finished
+slurmstepd: error: *** JOB 12146997 ON gcn3 CANCELLED AT 2025-06-02T16:04:45 ***
+
+JOB STATISTICS
+==============
+Job ID: 12146997
+Cluster: snellius
+User/Group: jweerheim/jweerheim
+State: CANCELLED (exit code 0)
+Nodes: 1
+Cores per node: 9
+CPU Utilized: 00:00:00
+CPU Efficiency: 0.00% of 00:09:18 core-walltime
+Job Wall-clock time: 00:01:02
+Memory Utilized: 1.36 GB
+Memory Efficiency: 2.26% of 60.00 GB (60.00 GB/node)

@@ -23,7 +23,6 @@ import random
 from copy import deepcopy
 from openpyxl import load_workbook
 
-
 # Set device for training and evaluation
 if torch.cuda.is_available():
     device = torch.device("cuda")
@@ -50,22 +49,21 @@ if Data_Augmentation:
         transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010])
     ])
     
-    full_dataset = datasets.CIFAR10(root='./data/Cifar-10', train=True, download=False, transform=train_transform)
-    test_dataset = datasets.CIFAR10(root='./data/Cifar-10', train=False, download=False, transform=test_transform)
+    full_dataset = datasets.CIFAR10(root='/scratch-local/74053/data/Cifar-10', train=True, download=True, transform=train_transform)
+    test_dataset = datasets.CIFAR10(root='/scratch-local/74053/data/Cifar-10', train=False, download=True, transform=test_transform)
     
-
 else:
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010])
     ])
     
-    full_dataset = datasets.CIFAR10(root='./data/Cifar-10', train=True, download=False, transform=transform)
-    test_dataset = datasets.CIFAR10(root='./data/Cifar-10', train=False, download=False, transform=transform)
+    full_dataset = datasets.CIFAR10(root='$TMPDIR/data/Cifar-10', train=True, download=False, transform=transform)
+    test_dataset = datasets.CIFAR10(root='./$TMPDIR/Cifar-10', train=False, download=False, transform=transform)
 
 
 # Load CIFAR-10 datasets
-test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+test_loader = DataLoader(test_dataset, batch_size=128, shuffle=False)
 
 # Split into training and validation sets
 train_size = int(0.9 * len(full_dataset))
@@ -76,8 +74,8 @@ train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
 if Data_Augmentation:
     val_dataset.dataset.transform = test_transform
 
-train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
+train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True)
+val_loader = DataLoader(val_dataset, batch_size=128, shuffle=False)
 
 print("Data Augmentation applied: ", Data_Augmentation)
 print(f"Number of Train samples: {len(train_dataset)}")
@@ -666,22 +664,26 @@ def compare_weights():
 
 if __name__ == '__main__':
     sch = 'cosine'
-    lrs = [1e-3]
-    epochs = [1]
+    lr = 1e-3
+    epoch = 100
     model = "Resnet20"
     variants = ["layerwise", "hints", "no_kd", "distill"]
+    alphas = [0.1, 0.25, 0.5, 0.75]
+    omegas = [0.1, 0.25, 0.5, 0.75]
 
     results = []
     trial = 0
-    EXP = "Layerwise_KD"
+    EXP = "hyperparameter_search"
 
-    for lr in lrs:
-        for epoch in epochs:
-            for variant in variants:
-                test_acc, profiling = Global_iterative_filter_pruning(scheduler=sch, prune_steps=3, prune_ratio=[0.2, 0.2, 0.2], model_name=model, epochs=epoch, lr=lr, exp_name=f"Exp_{trial+1}_{EXP}_{model.upper()}_{sch.upper()}_Lr_{str(lr)}_Epoch_{str(epoch)}", rebuild=True, KD_variant=variant)
+    for variant in variants:
+        for alpha in alphas:
+            for omega in omegas:
+                test_acc, profiling = Global_iterative_filter_pruning(scheduler=sch, prune_steps=3, prune_ratio=[0.2, 0.2, 0.2], model_name=model, epochs=epoch, lr=lr, exp_name=f"Exp_{trial+1}_{EXP}_{model.upper()}_{sch.upper()}_Lr_{str(lr)}_Epoch_{str(epoch)}_variant_{variant}_alpha_{alpha}_omega_{omega}", rebuild=True, KD_variant=variant)
 
                 results.append({
                         "Variant": variant,
+                        "alpha": alpha,
+                        "omega": omega,
                         "Trial": trial + 1,
                         "Learning Rate": lr,
                         "Epochs": epoch,
@@ -693,14 +695,15 @@ if __name__ == '__main__':
                         "MAC's": profiling["MAC's"],
                         "Model Size (MB)": profiling["model_size"],
                         })
-
-                results_df = pd.DataFrame(results)
-                result_path = f"./saves/Results/Exp_{EXP}_{model.upper()}_results.csv"
-                if os.path.exists(result_path):
-                    results_df.to_csv(result_path, mode='a', header=False, index=False)
-                else:
-                    results_df.to_csv(result_path, index=False)
+                print(f"Completed trial {trial+1} for variant={variant}, alpha={alpha}, omega={omega}")
                 trial += 1
+
+    results_df = pd.DataFrame(results)
+    result_path = f"./saves/Results/Exp_{EXP}_variant_{variant}_alpha_{alpha}_omega_{omega}_{model.upper()}_results.csv"
+    if os.path.exists(result_path):
+        results_df.to_csv(result_path, mode='a', header=False, index=False)
+    else:
+        results_df.to_csv(result_path, index=False)
 
     print(f"{'-'*20}EXPERIMENT FINISHED{'-'*20}")
     exit()
