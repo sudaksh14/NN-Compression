@@ -7,7 +7,6 @@
 # ignore directories
 __pycache__/
 data/
-plots/
 outputs/
 saves/
 

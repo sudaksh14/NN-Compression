@@ -10,11 +10,12 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import accuracy_score, f1_score
 import os
 import pickle
+from datetime import datetime
 import numpy as np
 
 
 
-def plot_metrics(accuracy, f1_score, ticks, save_path="./plots/metrics_plot.png"):
+def plot_metrics(accuracy, f1_score, ticks, save_path="./plots/new/metrics_plot.png"):
 
     if len(accuracy) != len(f1_score) or len(accuracy) != len(ticks):
         raise ValueError("Accuracy, F1 score, and x_ticks must have the same length.")
@@ -36,7 +37,7 @@ def plot_metrics(accuracy, f1_score, ticks, save_path="./plots/metrics_plot.png"
     # Set custom ticks
     plt.xticks(np.arange(len(accuracy)), labels=ticks, fontsize=10)
     
-    plt.grid(alpha=0.4)
+    # plt.grid(alpha=0.4)
     
     # Save the plot to the specified file
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
@@ -44,68 +45,96 @@ def plot_metrics(accuracy, f1_score, ticks, save_path="./plots/metrics_plot.png"
     print(f"Plot saved as {save_path}")
 
 
-
 # Plot the loss and accuracy curves
 def plot_curves(num_epochs, train_losses, train_accuracies, prune_ratio, exp_name):
     
     # Plot the training and validation loss curves
-    plt.figure(figsize=(12, 5))
+    plt.figure(figsize=(12, 6))
 
     # Plot Loss vs. Epoch
     plt.subplot(1, 2, 1)
     plt.plot(range(1, num_epochs + 1), train_losses, label='Train Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.title('Loss vs. Epoch')
-    plt.legend()
+    plt.xlabel('Epoch', fontsize=13)
+    plt.ylabel('Loss', fontsize=13)
+    plt.title('Loss vs. Epoch', fontsize=14)
+    plt.legend(fontsize=12)
+    # plt.grid()  # Added grid
 
     # Plot Accuracy vs. Epoch
     plt.subplot(1, 2, 2)
     plt.plot(range(1, num_epochs + 1), train_accuracies, label='Train Accuracy')
-    plt.xlabel('Epoch')
-    plt.ylabel('Accuracy')
-    plt.title('Accuracy vs. Epoch')
-    plt.legend()
+    plt.xlabel('Epoch', fontsize=13)
+    plt.ylabel('Accuracy', fontsize=13)
+    plt.title('Accuracy vs. Epoch', fontsize=14)
+    plt.legend(fontsize=12)
+    # plt.grid()  # Added grid
     
-    plt.savefig(f"./plots/{exp_name}_Learning_Curve_Fine-Tuning_pruning_{str(int(prune_ratio*100))}")
-   
-   
+    plt.tight_layout() # Added tight_layout for better spacing
+    plt.savefig(f"./plots/new/{exp_name}_Learning_Curve_Fine-Tuning_pruning_{str(int(prune_ratio*100))}.png", dpi=300) # Ensure .png extension for consistency
+
+# def plot_curves_with_val(num_epochs, train_losses, train_accuracies, val_losses, val_accuracies, lrs, exp_name):
     
+#     # Plot the training and validation loss curves
+#     plt.figure(figsize=(16, 8))
+
+#     # Plot Loss vs. Epoch
+#     plt.subplot(2, 1, 1)
+#     plt.plot(range(1, num_epochs + 1), train_losses, label='Train Loss')
+#     plt.plot(range(1, num_epochs + 1), val_losses, label='Validation Loss')
+#     plt.xlabel('Epoch')
+#     plt.ylabel('Loss')
+#     plt.title('Loss vs. Epoch')
+#     plt.legend()
+#     # plt.grid()
+
+#     # Plot Accuracy vs. Epoch
+#     plt.subplot(2, 1, 2)
+#     plt.plot(range(1, num_epochs + 1), train_accuracies, label='Train Accuracy')
+#     plt.plot(range(1, num_epochs + 1), val_accuracies, label='Validation Accuracy')
+#     plt.xlabel('Epoch')
+#     plt.ylabel('Accuracy')
+#     plt.title('Accuracy vs. Epoch')
+#     plt.legend()
+#     # # plt.grid()
+    
+#     plt.subplot(2, 1, 2)
+#     plt.plot(range(1, num_epochs + 1), lrs, label='Learning Rate', color='purple', marker='o')
+#     plt.title('Learning Rate vs Epochs')
+#     plt.xlabel('Epochs')
+#     plt.ylabel('Learning Rate')
+#     plt.legend()
+#     # # plt.grid()
+    
+#     plt.tight_layout()
+#     plt.savefig(f"./plots/new/{exp_name}_Learning_Curve.png")
+
 def plot_curves_with_val(num_epochs, train_losses, train_accuracies, val_losses, val_accuracies, lrs, exp_name):
     
     # Plot the training and validation loss curves
-    plt.figure(figsize=(16, 8))
+    plt.figure(figsize=(12, 6)) # Adjusted figsize for 1x2 layout, can be tweaked
 
     # Plot Loss vs. Epoch
-    plt.subplot(2, 2, 1)
+    plt.subplot(2, 1, 1) # Changed to 1 row, 2 columns, first plot
     plt.plot(range(1, num_epochs + 1), train_losses, label='Train Loss')
     plt.plot(range(1, num_epochs + 1), val_losses, label='Validation Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.title('Loss vs. Epoch')
-    plt.legend()
-    plt.grid()
+    plt.xlabel('Epoch', fontsize=13)
+    plt.ylabel('Loss', fontsize=13)
+    plt.title('Loss vs. Epoch', fontsize=14)
+    plt.legend(fontsize=12)
+    # # plt.grid()
 
     # Plot Accuracy vs. Epoch
-    plt.subplot(2, 2, 2)
+    plt.subplot(2, 1, 2) # Changed to 1 row, 2 columns, second plot
     plt.plot(range(1, num_epochs + 1), train_accuracies, label='Train Accuracy')
     plt.plot(range(1, num_epochs + 1), val_accuracies, label='Validation Accuracy')
-    plt.xlabel('Epoch')
-    plt.ylabel('Accuracy')
-    plt.title('Accuracy vs. Epoch')
-    plt.legend()
-    plt.grid()
-    
-    plt.subplot(2, 1, 2)
-    plt.plot(range(1, num_epochs + 1), lrs, label='Learning Rate', color='purple', marker='o')
-    plt.title('Learning Rate vs Epochs')
-    plt.xlabel('Epochs')
-    plt.ylabel('Learning Rate')
-    plt.legend()
-    plt.grid()
-    
+    plt.xlabel('Epoch', fontsize=13)
+    plt.ylabel('Accuracy', fontsize=13)
+    plt.title('Accuracy vs. Epoch', fontsize=14)
+    plt.legend(fontsize=12)
+    # plt.grid()
+
     plt.tight_layout()
-    plt.savefig(f"./plots/{exp_name}_Learning_Curve.png")
+    plt.savefig(f"./plots/new/{exp_name}_Learning_Curve.png", dpi=300)
 
 
 # Plotting results
@@ -116,7 +145,7 @@ def plot_comparison(val_accuracy, val_f1_score, fine_tune_accuracy, fine_tune_f1
             color=['skyblue', 'salmon', 'skyblue', 'salmon'])
     plt.ylabel("Score")
     plt.title("Evaluation Metrics Before and After Fine-Tuning")
-    plt.savefig(f"./plots/{exp_name}_Resnet20_Accuracy_Comparison_{str(int(prune_ratio*100))}")
+    plt.savefig(f"./plots/new/{exp_name}_Resnet20_Accuracy_Comparison_{str(int(prune_ratio*100))}")
     
     
 def plot_comparison_3stage(accuracy_list, exp_name, prune_ratio):
@@ -139,7 +168,7 @@ def plot_comparison_3stage(accuracy_list, exp_name, prune_ratio):
     plt.ylabel("Metrics")
     plt.title("Evaluation Metrics for Pruning and Rebuilding")
     plt.tight_layout()
-    plt.savefig(f"./plots/{exp_name}_Resnet20_Accuracy_Comparison_{str(int(prune_ratio*100))}.png")
+    plt.savefig(f"./plots/new/{exp_name}_Resnet20_Accuracy_Comparison_{str(int(prune_ratio*100))}.png")
 
 
 def plot_multilevel(accuracies, exp_name, labels = ["Original", "Core Model", "Rebuilt"]):
@@ -172,9 +201,8 @@ def plot_multilevel(accuracies, exp_name, labels = ["Original", "Core Model", "R
     plt.tight_layout()
 
     # Save Plot
-    plt.savefig(f"./plots/{exp_name}_Rebuilt_performance.png")
+    plt.savefig(f"./plots/new/{exp_name}_Rebuilt_performance.png", dpi=300)
 
-    
 
 def plot_profiling(params, macs, sizes, exp_name, labels = ["Original", "Pruned", "Rebuilt"]):
 
@@ -201,8 +229,8 @@ def plot_profiling(params, macs, sizes, exp_name, labels = ["Original", "Pruned"
     fig.suptitle("Profiling Metrics", fontsize=16)
 
     # Save and show the plot
-    plt.savefig(f"./plots/{exp_name}_Profiling_Metrics.png")
-
+    plt.savefig(f"./plots/new/{exp_name}_Profiling_Metrics.png", dpi=300)
+    
 
 def visualize_weights(weights, title="Pruned Weights in Conv1", save_path="./plots", name="conv1_pruned_weights.png"):
     """
@@ -287,19 +315,19 @@ def plot_KD_metrics(train_losses, train_KD_losses, train_accuracies, val_losses,
     else:
         plt.plot(epochs_range, train_KD_losses, label="Distillation Loss")
     plt.plot(epochs_range, val_losses, label="Validation Loss")
-    plt.xlabel("Epochs")
-    plt.ylabel("Loss")
-    plt.legend()
-    plt.title("Loss Metrics")
+    plt.xlabel("Epochs", fontsize=13)
+    plt.ylabel("Loss", fontsize=13)
+    plt.legend(fontsize=12)
+    plt.title("Loss Metrics", fontsize=14)
 
     # Plot accuracies
     plt.subplot(2, 1, 2)
     plt.plot(epochs_range, train_accuracies, label="Train Accuracy")
     plt.plot(epochs_range, val_accuracies, label="Validation Accuracy")
-    plt.xlabel("Epochs")
-    plt.ylabel("Accuracy")
-    plt.legend()
-    plt.title("Accuracy Metrics")
+    plt.xlabel("Epochs", fontsize=13)
+    plt.ylabel("Accuracy", fontsize=13)
+    plt.legend(fontsize=12)
+    plt.title("Accuracy Metrics", fontsize=14)
 
     plt.tight_layout()
-    plt.savefig(f"./plots/{exp_name}_KD_curves.png")
+    plt.savefig(f"./plots/new/{exp_name}_KD_curves_{datetime.now()}.png", dpi=300)
