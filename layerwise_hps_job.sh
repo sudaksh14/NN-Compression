@@ -1,7 +1,7 @@
 #!/bin/bash
 #Set job requirements
-#SBATCH -J hyperparameter_search_layerwise
-#SBATCH -t 48:00:00
+#SBATCH -J resnet
+#SBATCH -t 12:00:00
 #SBATCH -p gpu_mig
 #SBATCH -N 1
 #SBATCH --gpus=1
